@@ -1,5 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import { fetchRainForecast, fetchAQI } from "./lib/liveData.js";
+import { fetchGrievanceTrend } from "./lib/forecast.js";
+import { classifyGrievance } from "./lib/classify.js";
 import { supabase } from "./lib/supabase.js";
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -214,36 +218,31 @@ const INTERVENTIONS = [
 const ETHICS_SECTIONS = [
   {
     icon: "⚖️",
-    title: "DPDP Act 2023 Compliance",
+    title: "We follow India's data protection law",
     body:
-      "The NMC Command Centre operates in strict adherence to India's Digital Personal " +
-      "Data Protection Act of 2023. Data processing is conducted solely for the purpose " +
-      "of municipal administration and civic service delivery, ensuring unambiguous " +
-      "consent or legitimate civic purpose as defined under the Act.",
+      "We follow India's Digital Personal Data Protection Act of 2023. We only use " +
+      "your data to run city services — never for anything else.",
   },
   {
     icon: "🔻",
-    title: "Data Minimisation",
+    title: "We collect as little as possible",
     body:
-      "Our systems enforce a strict data minimisation policy. We collect only the " +
-      "telemetry, geospatial, and reporting data strictly necessary for municipal " +
-      "operations. Extraneous metadata is automatically discarded at the ingestion layer.",
+      "We only save the information we actually need to fix problems. " +
+      "Anything extra is thrown away right away, not stored.",
   },
   {
     icon: "👁️",
-    title: "Anonymisation",
+    title: "We hide who you are",
     body:
-      "To protect citizen identity, all analytical dashboards and geospatial views employ " +
-      "spatial aggregation and k-anonymity techniques. Individual citizen reports are " +
-      "decoupled from PII before entering predictive models.",
+      "Maps and charts only show group totals, not individual people. " +
+      "A citizen's report is separated from their identity before any computer looks at it.",
   },
   {
     icon: "🤝",
-    title: "Human-in-the-Loop Principle",
+    title: "A person always decides, not the computer",
     body:
-      "Artificial Intelligence and predictive algorithms within the Command Centre are " +
-      "strictly advisory. They surface anomalies, patterns and risk scores — but every " +
-      "routing, dispatch or public advisory action requires explicit officer approval.",
+      "Our computer only points out patterns and possible problems — it never acts on its " +
+      "own. Every dispatch, message, or approval needs a real officer to click \"yes\" first.",
   },
 ];
 
@@ -507,58 +506,89 @@ function LineChart({ data, height = 150 }) {
   );
 }
 
-const hexToRgba = (hex, alpha) => {
-  const n = parseInt(hex.slice(1), 16);
-  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-  return `rgba(${r},${g},${b},${alpha})`;
+// Real, approximate coordinates for Nagpur localities named across the app.
+const WARDS = {
+  sitabuldi:  { lat: 21.1462, lng: 79.0790 },
+  gandhibagh: { lat: 21.1544, lng: 79.1119 },
+  lakadganj:  { lat: 21.1602, lng: 79.1197 },
+  dharampeth: { lat: 21.1394, lng: 79.0637 },
+  mahal:      { lat: 21.1489, lng: 79.1050 },
+  ambazari:   { lat: 21.1225, lng: 79.0378 },
+  itwari:     { lat: 21.1531, lng: 79.1114 },
+};
+const NAGPUR_CENTER = [21.1458, 79.0882];
+
+// What each map "layer" button on the Command screen actually shows —
+// three different, real marker sets, not the same map redrawn.
+const COMMAND_LAYER_MARKERS = {
+  "Grievances": [
+    { ward: "sitabuldi", color: "#f43f5e", label: "Sitabuldi — most complaints", size: 16 },
+    { ward: "gandhibagh", color: "#f59e0b", label: "Gandhibagh — some complaints", size: 13 },
+    { ward: "lakadganj", color: "#6366f1", label: "Lakadganj — few complaints", size: 10 },
+  ],
+  "Flood Risk": [
+    { ward: "ambazari", color: "#dc2626", label: "Ambazari — high flood risk", size: 16 },
+    { ward: "sitabuldi", color: "#f59e0b", label: "Sitabuldi — some flood risk", size: 12 },
+    { ward: "dharampeth", color: "#6366f1", label: "Dharampeth — low flood risk", size: 10 },
+  ],
+  "Air Quality": [
+    { ward: "itwari", color: "#dc2626", label: "Itwari — bad air", size: 16 },
+    { ward: "mahal", color: "#f59e0b", label: "Mahal — okay air", size: 12 },
+    { ward: "dharampeth", color: "#6366f1", label: "Dharampeth — good air", size: 10 },
+  ],
 };
 
 /**
- * Dark geospatial panel with soft colour "blooms" and labelled dot markers —
- * standing in for a real H3/ward-level density layer. Unlike an abstract
- * hex grid, every marker names a real ward, so each screen's map actually
- * reflects what it's captioned as instead of looking like generic noise.
+ * A real, interactive map of Nagpur (OpenStreetMap tiles via Leaflet — free,
+ * no API key needed) with coloured markers at real ward coordinates.
+ * `markers`: [{ ward, label, color, size? }]
  */
-function DotMap({ points, caption, height = 280 }) {
-  const blooms = points
-    .map((p) => `radial-gradient(circle at ${p.x} ${p.y}, ${hexToRgba(p.color, p.alpha ?? 0.5)}, ${hexToRgba(p.color, 0)} ${p.radius ?? 40}%)`)
-    .join(", ");
+function NagpurMap({ markers, caption, height = 280, zoom = 12 }) {
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const layerRef = useRef(null);
+
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current) return;
+    const map = L.map(containerRef.current, {
+      center: NAGPUR_CENTER,
+      zoom,
+      scrollWheelZoom: false,
+    });
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 18,
+    }).addTo(map);
+    layerRef.current = L.layerGroup().addTo(map);
+    mapRef.current = map;
+    return () => { map.remove(); mapRef.current = null; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!mapRef.current || !layerRef.current) return;
+    layerRef.current.clearLayers();
+    markers.forEach((m) => {
+      const pos = WARDS[m.ward];
+      if (!pos) return;
+      const size = m.size ?? 14;
+      const icon = L.divIcon({
+        className: "",
+        html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${m.color};border:2px solid white;box-shadow:0 0 0 4px ${m.color}55"></div>`,
+        iconSize: [size, size],
+        iconAnchor: [size / 2, size / 2],
+      });
+      L.marker([pos.lat, pos.lng], { icon })
+        .bindTooltip(m.label, { direction: "top", offset: [0, -size / 2] })
+        .addTo(layerRef.current);
+    });
+  }, [markers]);
 
   return (
-    <div
-      className="relative rounded-2xl overflow-hidden"
-      style={{
-        height,
-        backgroundColor: "#12141c",
-        backgroundImage:
-          "linear-gradient(rgba(255,255,255,.05) 1px,transparent 1px)," +
-          "linear-gradient(90deg,rgba(255,255,255,.05) 1px,transparent 1px)" +
-          (blooms ? `, ${blooms}` : ""),
-        backgroundSize: "26px 26px, 26px 26px" + points.map(() => ", auto").join(""),
-      }}
-    >
-      {points.map((p) => (
-        <div
-          key={p.label}
-          className="absolute flex flex-col items-center"
-          style={{ left: p.x, top: p.y, transform: "translate(-50%,-50%)" }}
-        >
-          <span
-            className="rounded-full block"
-            style={{
-              width: p.size ?? 9,
-              height: p.size ?? 9,
-              background: p.color,
-              boxShadow: `0 0 0 4px ${hexToRgba(p.color, 0.22)}`,
-            }}
-          />
-          <span className="mt-1 text-[11px] text-white bg-black/50 px-1.5 py-0.5 rounded whitespace-nowrap">
-            {p.label}
-          </span>
-        </div>
-      ))}
+    <div className="relative rounded-2xl overflow-hidden" style={{ height }}>
+      <div ref={containerRef} className="w-full h-full" />
       {caption && (
-        <div className="absolute bottom-3 left-3 text-[11px] text-slate-300 bg-black/40 px-2 py-1 rounded">
+        <div className="absolute bottom-3 left-3 z-[1000] text-[11px] text-slate-700 bg-white/90 px-2 py-1 rounded shadow">
           {caption}
         </div>
       )}
@@ -569,7 +599,9 @@ function DotMap({ points, caption, height = 280 }) {
 
 /* ──────────────────────── SECTION 4: TOP HEADER BAR ──────────────────────── */
 
-function TopBar({ title }) {
+function TopBar({ title, session, onOpenAuth }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+
   return (
     <div className="h-[68px] flex-shrink-0 flex items-center justify-between px-9 border-b border-slate-100 bg-white">
       <div className="text-[15px] font-bold text-slate-900" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
@@ -580,9 +612,40 @@ function TopBar({ title }) {
           <span className="w-[7px] h-[7px] rounded-full bg-emerald-600 pulse-dot" />
           Live · Oct 24, 2023
         </div>
-        <div className="w-8 h-8 rounded-full bg-indigo-950 text-white flex items-center justify-center text-xs font-bold">
-          A
-        </div>
+
+        {!supabase ? (
+          <div className="w-8 h-8 rounded-full bg-indigo-950 text-white flex items-center justify-center text-xs font-bold">
+            A
+          </div>
+        ) : session ? (
+          <div className="relative">
+            <button
+              onClick={() => setMenuOpen((v) => !v)}
+              className="w-8 h-8 rounded-full bg-indigo-950 text-white flex items-center justify-center text-xs font-bold"
+            >
+              {session.user.email[0].toUpperCase()}
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 top-11 bg-white rounded-xl border border-slate-100 p-3 w-56 z-50" style={{ boxShadow: CARD_SHADOW }}>
+                <div className="text-[11px] text-slate-400">Signed in as</div>
+                <div className="text-sm font-semibold text-slate-800 truncate mb-3">{session.user.email}</div>
+                <button
+                  onClick={() => { supabase.auth.signOut(); setMenuOpen(false); }}
+                  className="w-full text-xs font-bold text-red-600 border border-red-200 rounded-lg py-1.5 hover:bg-red-50"
+                >
+                  Sign Out
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <button
+            onClick={onOpenAuth}
+            className="text-xs font-bold bg-indigo-950 text-white px-3.5 py-2 rounded-[10px] hover:bg-indigo-900 whitespace-nowrap"
+          >
+            Sign In / Sign Up
+          </button>
+        )}
       </div>
     </div>
   );
@@ -600,19 +663,22 @@ function CommandView({ onOpenAlert }) {
       {/* Kinetic hero headline */}
       <div className="pb-9 mb-9 border-b border-slate-100">
         <div className="text-xs font-bold tracking-[0.12em] text-indigo-600 mb-3.5">
-          COMMAND CENTER — LIVE FORECAST
+          TODAY'S FORECAST FOR NAGPUR
         </div>
         <KineticHeadline
           words={[
             { text: "188", color: "#4338ca" },
-            { text: "predicted." },
-            { text: "Zero", break: true },
-            { text: "surprises." },
+            { text: "problems", break: true },
+            { text: "found", },
+            { text: "before", break: true },
+            { text: "they", },
+            { text: "happen." },
           ]}
         />
         <p className="text-[17px] leading-relaxed text-slate-500 max-w-xl mt-4">
-          SLA breaches, floods and air-quality spikes are forecast days before residents feel
-          them. Every dispatch and advisory still needs an officer's sign-off.
+          This tool looks for floods, bad air, and slow complaints before they get worse — and
+          warns the team early. A human officer always makes the final decision; the computer
+          only suggests.
         </p>
       </div>
 
@@ -646,14 +712,7 @@ function CommandView({ onOpenAlert }) {
             <span className="text-xs text-slate-400">Ward Filter: All Wards</span>
           </div>
 
-          <DotMap
-            caption={`${mapLayer} layer`}
-            points={[
-              { x: "25%", y: "33%", color: "#f43f5e", label: "Sitabuldi", size: 9 },
-              { x: "62%", y: "17%", color: "#f59e0b", label: "Gandhibagh", size: 8 },
-              { x: "75%", y: "67%", color: "#6366f1", label: "Lakadganj", size: 7 },
-            ]}
-          />
+          <NagpurMap caption={`Showing: ${mapLayer}`} markers={COMMAND_LAYER_MARKERS[mapLayer]} />
         </div>
 
         {/* Proactive alerts feed */}
@@ -799,11 +858,12 @@ function AlertDetailModal({ alert, onClose, onIssueAdvisory }) {
 
           {/* RIGHT COLUMN — what the officer can actually do about it */}
           <div>
-            <div className="text-[11px] font-bold text-slate-400 mb-2">LOCALIZED RISK MAP</div>
-            <DotMap
-              caption="Zoom: Ward Level"
+            <div className="text-[11px] font-bold text-slate-400 mb-2">WHERE THIS IS HAPPENING</div>
+            <NagpurMap
+              caption="Ambazari, Nagpur"
               height={220}
-              points={[{ x: "50%", y: "33%", color: "#f43f5e", label: "Ambazari · Ward Level", size: 10 }]}
+              zoom={14}
+              markers={[{ ward: "ambazari", color: "#dc2626", label: "Ambazari — flood risk here", size: 18 }]}
             />
 
             <div className="text-[11px] font-bold text-slate-400 mt-4 mb-2">AVAILABLE FIELD TEAMS</div>
@@ -889,11 +949,20 @@ function GrievanceTriage({ session }) {
     e.preventDefault();
     if (!supabase || !form.text.trim()) return;
     setSubmitting(true);
+
+    // Ask the AI classifier for a department guess + confidence + a
+    // translation, if the citizen didn't already provide one. Never blocks
+    // the submission — on any failure it's just left PENDING REVIEW for an
+    // officer, same as before this existed.
+    const ai = await classifyGrievance(form.text);
+
     const { error } = await supabase.from("grievances").insert({
       text: form.text.trim(),
-      en: form.en.trim() || null,
+      en: form.en.trim() || ai?.english || null,
       ward: form.ward.trim() || null,
       lang: form.lang,
+      dept: ai?.department || "PENDING REVIEW",
+      conf: ai?.confidence ?? null,
     });
     setSubmitting(false);
     if (!error) {
@@ -922,7 +991,8 @@ function GrievanceTriage({ session }) {
               Triage Inbox
             </h1>
             <p className="text-sm text-slate-400">
-              Incoming citizen grievances requiring AI verification and officer assignment.
+              Complaints from citizens. The AI reads each one and guesses which department
+              should handle it — an officer checks and approves before anything happens.
               {live ? (
                 <span className="text-emerald-600 font-bold"> ● LIVE · Supabase</span>
               ) : (
@@ -981,7 +1051,7 @@ function GrievanceTriage({ session }) {
                 disabled={submitting}
                 className="flex-1 bg-indigo-950 text-white rounded-lg py-2 text-xs font-bold disabled:opacity-50"
               >
-                {submitting ? "Submitting…" : "Submit Grievance"}
+                {submitting ? "AI is reading it…" : "Submit Grievance"}
               </button>
               <button type="button" onClick={() => setShowForm(false)} className="text-xs text-slate-400 px-3">
                 Cancel
@@ -1113,7 +1183,7 @@ function GrievanceTriage({ session }) {
 
         {live && !session && (
           <p className="text-[11px] text-center text-amber-600 mb-2">
-            Officer sign-in required to triage (see sidebar).
+            Sign in as an officer (top right) to approve, reassign, or escalate.
           </p>
         )}
 
@@ -1150,6 +1220,7 @@ function GrievanceTriage({ session }) {
 
 function HotspotForecast() {
   const aqiState = useLive(fetchAQI, { pm10: null, aqi: null });
+  const trendState = useLive(fetchGrievanceTrend, FORECAST);
 
   return (
     <div>
@@ -1158,13 +1229,13 @@ function HotspotForecast() {
         {/* Spatial clusters */}
         <div className="bg-white rounded-[20px] p-5" style={{ boxShadow: CARD_SHADOW }}>
           <div className="font-bold text-slate-900 mb-3" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
-            Spatial Intelligence
+            Where Problems Are
           </div>
-          <DotMap
-            points={[
-              { x: "12%", y: "33%", color: "#f43f5e", label: "Dharampeth · 412", size: 9 },
-              { x: "62%", y: "17%", color: "#f59e0b", label: "Sitabuldi · 185", size: 8 },
-              { x: "75%", y: "67%", color: "#6366f1", label: "Mahal · 89", size: 7 },
+          <NagpurMap
+            markers={[
+              { ward: "dharampeth", color: "#f43f5e", label: "Dharampeth — 412 complaints", size: 16 },
+              { ward: "sitabuldi", color: "#f59e0b", label: "Sitabuldi — 185 complaints", size: 13 },
+              { ward: "mahal", color: "#6366f1", label: "Mahal — 89 complaints", size: 10 },
             ]}
           />
         </div>
@@ -1176,9 +1247,15 @@ function HotspotForecast() {
               <div className="font-bold text-slate-900" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
                 Complaint Volume Forecast
               </div>
-              <div className="text-[11px] text-slate-400">14-Day Trajectory (95% CI)</div>
+              <div className="text-[11px]">
+                {trendState.live ? (
+                  <span className="text-emerald-600 font-bold">● LIVE trend, real grievances</span>
+                ) : (
+                  <span className="text-slate-400">demo data</span>
+                )}
+              </div>
             </div>
-            <LineChart data={FORECAST} height={150} />
+            <LineChart data={trendState.data} height={150} />
           </div>
 
           <div className="bg-white rounded-[20px] p-5" style={{ boxShadow: CARD_SHADOW }}>
@@ -1398,11 +1475,11 @@ function FieldTeams() {
       <div className="grid grid-cols-3 gap-6">
         <div className="col-span-2 space-y-6">
           <div className="bg-white rounded-[20px] p-5" style={{ boxShadow: CARD_SHADOW }}>
-            <DotMap
+            <NagpurMap
               height={260}
-              points={[
-                { x: "25%", y: "17%", color: "#6366f1", label: "RRT-Alpha · On Site", size: 9 },
-                { x: "75%", y: "50%", color: "#6366f1", label: "Drain-Unit 4 · En Route", size: 8 },
+              markers={[
+                { ward: "ambazari", color: "#6366f1", label: "RRT-Alpha — on site, Ambazari", size: 16 },
+                { ward: "sitabuldi", color: "#6366f1", label: "Drain-Unit 4 — on the way, Sitabuldi", size: 13 },
               ]}
             />
           </div>
@@ -1508,15 +1585,13 @@ function Trust() {
       {/* LEFT — the compliance sections */}
       <div className="col-span-2">
         <div className="text-xs font-bold text-slate-400 tracking-wide mb-1">
-          COMPLIANCE &amp; GOVERNANCE
+          RULES &amp; TRUST
         </div>
         <h1 className="text-[28px] font-extrabold text-slate-900 mb-3" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
-          Ethics &amp; Legal Position
+          How We Protect Your Privacy
         </h1>
         <p className="text-sm text-slate-500 mb-6 max-w-xl">
-          The Nagpur Municipal Corporation's data governance framework prioritizes citizen
-          privacy, operational transparency, and strictly defined scopes for algorithmic
-          intervention.
+          Here's exactly what we do — and don't do — with your data, in plain words.
         </p>
 
         <div className="grid grid-cols-2 gap-4">
@@ -1537,15 +1612,14 @@ function Trust() {
         <div className="bg-gradient-to-b from-[#1e2233] to-[#12141c] text-white rounded-[18px] p-5">
           <div className="flex items-start gap-2 font-bold mb-3 text-lg leading-tight">
             <span className="text-red-400">🚫</span>
-            <span>What we deliberately did not build</span>
+            <span>Things we chose NOT to build</span>
           </div>
           <p className="text-xs text-slate-300 mb-4 leading-relaxed">
-            In our pursuit of a smart city, we prioritize civil liberties over surveillance
-            capabilities. The following technologies are explicitly excluded from the NMC
-            architecture:
+            We care more about your freedom and privacy than about watching people. We will
+            never add:
           </p>
           <ul className="space-y-2.5 text-sm font-semibold">
-            {["No Facial Recognition", "No Predictive Policing", "No Citizen Profiling"].map((item) => (
+            {["No Facial Recognition", "No Predicting Who Will Commit a Crime", "No Tracking Individual People"].map((item) => (
               <li key={item} className="flex items-center gap-2 text-red-400">
                 <span>✕</span> {item.toUpperCase()}
               </li>
@@ -1554,13 +1628,13 @@ function Trust() {
         </div>
 
         <div className="bg-white rounded-[18px] p-5" style={{ boxShadow: CARD_SHADOW }}>
-          <div className="text-xs font-bold text-slate-400 mb-1">AUDIT TRAIL</div>
+          <div className="text-xs font-bold text-slate-400 mb-1">EVERY ACTION IS RECORDED</div>
           <p className="text-xs text-slate-500 mb-2 leading-relaxed">
-            All data access and algorithmic decisions are immutably logged for periodic
-            review by independent ethics boards.
+            Every time someone looks at data or the computer suggests something, we write it
+            down. Independent reviewers can check this record any time.
           </p>
           <button className="text-xs font-bold text-indigo-600 hover:underline">
-            View Audit Policy →
+            See the Full Record →
           </button>
         </div>
       </div>
@@ -1569,77 +1643,82 @@ function Trust() {
 }
 
 
-/* ──────────────────── SECTION 11.5: OFFICER SIGN-IN PANEL ────────────────── */
+/* ──────────────────── SECTION 11.5: SIGN IN / SIGN UP MODAL ──────────────── */
 
-/** Gates write actions (approve/reassign/escalate) in the Triage Inbox.
- * Session state lives in the root shell (via Supabase's own auth listener)
- * and is passed down; this panel only drives sign-in/out. */
-function OfficerAuthPanel({ session }) {
-  const [open, setOpen] = useState(false);
+/** Full sign-in/sign-up dialog, opened from the top bar. Session state lives
+ * in the root shell (via Supabase's own auth listener); this only drives
+ * the form. Closes itself on a successful sign-in. */
+function AuthModal({ onClose }) {
+  const [mode, setMode] = useState("signin"); // "signin" | "signup"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
   const [busy, setBusy] = useState(false);
 
-  if (!supabase) {
-    return (
-      <div className="pt-3.5 px-3 text-[11px] text-slate-400 border-t border-slate-100 mt-2">
-        Nagpur Municipal Corporation<br />Command v2 · Demo data
-      </div>
-    );
-  }
+  if (!supabase) return null;
 
-  if (session) {
-    return (
-      <div className="pt-3.5 px-3 border-t border-slate-100 mt-2">
-        <div className="text-[11px] text-slate-400">Signed in as</div>
-        <div className="text-xs font-semibold text-slate-700 truncate mb-2">{session.user.email}</div>
-        <button onClick={() => supabase.auth.signOut()} className="text-[11px] font-bold text-red-600 hover:underline">
-          Sign out
-        </button>
-      </div>
-    );
-  }
-
-  const handleSignIn = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setBusy(true);
     setError("");
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-    setBusy(false);
-    if (signInError) setError(signInError.message);
-    else setOpen(false);
+    setInfo("");
+    if (mode === "signin") {
+      const { error: err } = await supabase.auth.signInWithPassword({ email, password });
+      setBusy(false);
+      if (err) setError(err.message);
+      else onClose();
+    } else {
+      const { error: err } = await supabase.auth.signUp({ email, password });
+      setBusy(false);
+      if (err) setError(err.message);
+      else setInfo("Account created. Check your email to confirm it, then sign in.");
+    }
   };
 
   return (
-    <div className="pt-3.5 px-3 border-t border-slate-100 mt-2">
-      {!open ? (
-        <button onClick={() => setOpen(true)} className="text-[11px] font-bold text-indigo-600 hover:underline">
-          Officer sign-in →
-        </button>
-      ) : (
-        <form onSubmit={handleSignIn} className="space-y-1.5">
-          <input
-            type="email" required placeholder="Officer email"
-            value={email} onChange={(e) => setEmail(e.target.value)}
-            className="w-full text-xs border border-slate-200 rounded-md px-2 py-1.5"
-          />
-          <input
-            type="password" required placeholder="Password"
-            value={password} onChange={(e) => setPassword(e.target.value)}
-            className="w-full text-xs border border-slate-200 rounded-md px-2 py-1.5"
-          />
-          {error && <div className="text-[10px] text-red-600">{error}</div>}
-          <div className="flex gap-1.5">
-            <button type="submit" disabled={busy} className="flex-1 text-[11px] font-bold bg-indigo-950 text-white rounded-md py-1.5 disabled:opacity-50">
-              {busy ? "Signing in…" : "Sign in"}
-            </button>
-            <button type="button" onClick={() => setOpen(false)} className="text-[11px] text-slate-400 px-2">
-              Cancel
-            </button>
+    <div className="fixed inset-0 bg-[#0a0a10]/60 flex items-center justify-center z-[60] p-6" onClick={onClose}>
+      <div className="bg-white rounded-3xl max-w-sm w-full p-6" onClick={(e) => e.stopPropagation()} style={{ boxShadow: "0 40px 80px -20px rgba(0,0,0,.35)" }}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="font-extrabold text-lg" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
+            {mode === "signin" ? "Officer Sign In" : "Create an Officer Account"}
           </div>
+          <button onClick={onClose} className="text-2xl leading-none text-slate-400 hover:text-slate-600">×</button>
+        </div>
+
+        <div className="flex gap-2 mb-4">
+          <button
+            onClick={() => { setMode("signin"); setError(""); setInfo(""); }}
+            className={`flex-1 text-xs font-bold py-2 rounded-lg ${mode === "signin" ? "bg-indigo-950 text-white" : "bg-slate-100 text-slate-500"}`}
+          >
+            Sign In
+          </button>
+          <button
+            onClick={() => { setMode("signup"); setError(""); setInfo(""); }}
+            className={`flex-1 text-xs font-bold py-2 rounded-lg ${mode === "signup" ? "bg-indigo-950 text-white" : "bg-slate-100 text-slate-500"}`}
+          >
+            Sign Up
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-2.5">
+          <input
+            type="email" required placeholder="Email"
+            value={email} onChange={(e) => setEmail(e.target.value)}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+          />
+          <input
+            type="password" required minLength={6} placeholder="Password (6+ characters)"
+            value={password} onChange={(e) => setPassword(e.target.value)}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+          />
+          {error && <div className="text-xs text-red-600">{error}</div>}
+          {info && <div className="text-xs text-emerald-600">{info}</div>}
+          <button type="submit" disabled={busy} className="w-full bg-indigo-950 text-white rounded-lg py-2.5 text-sm font-bold disabled:opacity-50">
+            {busy ? "Please wait…" : mode === "signin" ? "Sign In" : "Create Account"}
+          </button>
         </form>
-      )}
+      </div>
     </div>
   );
 }
@@ -1651,6 +1730,7 @@ export default function NagpurCommand() {
   const [view, setView] = useState("command");        // which screen is showing
   const [openAlert, setOpenAlert] = useState(null);   // null = modal closed
   const [session, setSession] = useState(null);       // officer auth session, null = signed out
+  const [authOpen, setAuthOpen] = useState(false);    // sign-in/sign-up dialog
 
   useEffect(() => {
     if (!supabase) return;
@@ -1689,12 +1769,14 @@ export default function NagpurCommand() {
           ))}
         </nav>
 
-        <OfficerAuthPanel session={session} />
+        <div className="pt-3.5 px-3 text-[11px] text-slate-400 border-t border-slate-100 mt-2">
+          Nagpur Municipal Corporation<br />Command v2 · Demo data
+        </div>
       </div>
 
       {/* ── Main area ── */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <TopBar title={SCREEN_TITLES[view]} />
+        <TopBar title={SCREEN_TITLES[view]} session={session} onOpenAuth={() => setAuthOpen(true)} />
         <div className="flex-1 overflow-y-auto">
           <div key={view} className="page-anim px-11 pt-10 pb-14">
             {view === "command"    && <CommandView onOpenAlert={setOpenAlert} />}
@@ -1716,6 +1798,8 @@ export default function NagpurCommand() {
           setView("advisory");  // ...and jump to the Advisory screen
         }}
       />
+
+      {authOpen && <AuthModal onClose={() => setAuthOpen(false)} />}
     </div>
   );
 }
