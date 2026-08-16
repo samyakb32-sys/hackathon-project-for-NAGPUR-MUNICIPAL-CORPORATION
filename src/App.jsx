@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { fetchRainForecast, fetchAQI } from "./lib/liveData.js";
+import { supabase } from "./lib/supabase.js";
 
 /* ═══════════════════════════════════════════════════════════════════════════
    NAGPUR COMMAND — Civic Foresight Dashboard
@@ -846,14 +847,68 @@ function AlertDetailModal({ alert, onClose, onIssueAdvisory }) {
 
 /* ───────────────────── SECTION 7: GRIEVANCE TRIAGE SCREEN ────────────────── */
 
-function GrievanceTriage() {
-  const [selected, setSelected] = useState(GRIEVANCES[0]);
+// Maps the sla field to [badge tone, human label]
+const SLA_DISPLAY = {
+  safe:     ["green", "Safe"],
+  risk:     ["amber", "At Risk"],
+  breached: ["red",   "Breached"],
+};
 
-  // Maps the sla field to [badge tone, human label]
-  const SLA_DISPLAY = {
-    safe:     ["green", "Safe"],
-    risk:     ["amber", "At Risk"],
-    breached: ["red",   "Breached"],
+function GrievanceTriage({ session }) {
+  const [grievances, setGrievances] = useState(GRIEVANCES);
+  const [live, setLive] = useState(false);
+  const [selectedId, setSelectedId] = useState(GRIEVANCES[0].id);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ text: "", en: "", ward: "", lang: "English" });
+  const [submitting, setSubmitting] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
+
+  const loadGrievances = async () => {
+    if (!supabase) return;
+    const { data, error } = await supabase
+      .from("grievances")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (!error && data && data.length) {
+      const mapped = data.map((g) => ({
+        ...g,
+        id: `#GR-${String(g.id).padStart(4, "0")}`,
+        rawId: g.id,
+      }));
+      setGrievances(mapped);
+      setLive(true);
+      setSelectedId((cur) => (mapped.some((g) => g.id === cur) ? cur : mapped[0].id));
+    }
+  };
+
+  useEffect(() => { loadGrievances(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  const selected = grievances.find((g) => g.id === selectedId) || grievances[0];
+
+  const submitGrievance = async (e) => {
+    e.preventDefault();
+    if (!supabase || !form.text.trim()) return;
+    setSubmitting(true);
+    const { error } = await supabase.from("grievances").insert({
+      text: form.text.trim(),
+      en: form.en.trim() || null,
+      ward: form.ward.trim() || null,
+      lang: form.lang,
+    });
+    setSubmitting(false);
+    if (!error) {
+      setForm({ text: "", en: "", ward: "", lang: "English" });
+      setShowForm(false);
+      await loadGrievances();
+    }
+  };
+
+  const triageAction = async (status) => {
+    if (!supabase || !session || !selected?.rawId) return;
+    setActionBusy(true);
+    await supabase.from("grievances").update({ status }).eq("id", selected.rawId);
+    setActionBusy(false);
+    await loadGrievances();
   };
 
   return (
@@ -861,14 +916,81 @@ function GrievanceTriage() {
 
       {/* LEFT — the inbox table */}
       <div className="col-span-2">
-        <h1 className="text-[28px] font-extrabold text-slate-900 mb-1" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
-          Triage Inbox
-        </h1>
-        <p className="text-sm text-slate-400 mb-5">
-          Incoming citizen grievances requiring AI verification and officer assignment.
-        </p>
+        <div className="flex items-start justify-between mb-1">
+          <div>
+            <h1 className="text-[28px] font-extrabold text-slate-900" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
+              Triage Inbox
+            </h1>
+            <p className="text-sm text-slate-400">
+              Incoming citizen grievances requiring AI verification and officer assignment.
+              {live ? (
+                <span className="text-emerald-600 font-bold"> ● LIVE · Supabase</span>
+              ) : (
+                <span className="text-slate-300 font-semibold"> demo data</span>
+              )}
+            </p>
+          </div>
+          {supabase && (
+            <button
+              onClick={() => setShowForm((v) => !v)}
+              className="text-xs font-bold bg-indigo-950 text-white px-3.5 py-2 rounded-[10px] hover:bg-indigo-900 whitespace-nowrap"
+            >
+              + New Grievance
+            </button>
+          )}
+        </div>
 
-        <div className="flex gap-2 mb-4 items-center">
+        {showForm && (
+          <form onSubmit={submitGrievance} className="bg-white rounded-2xl p-4 my-4 space-y-2.5" style={{ boxShadow: CARD_SHADOW }}>
+            <div className="text-[11px] font-bold text-slate-400">
+              CITIZEN INTAKE — submits directly into the live triage inbox
+            </div>
+            <textarea
+              required
+              placeholder="Describe the issue, in any language..."
+              value={form.text}
+              onChange={(e) => setForm({ ...form, text: e.target.value })}
+              className="w-full border border-slate-200 rounded-xl p-2.5 text-sm h-20"
+            />
+            <div className="grid grid-cols-3 gap-2">
+              <input
+                placeholder="English translation (optional)"
+                value={form.en}
+                onChange={(e) => setForm({ ...form, en: e.target.value })}
+                className="col-span-2 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs"
+              />
+              <select
+                value={form.lang}
+                onChange={(e) => setForm({ ...form, lang: e.target.value })}
+                className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs"
+              >
+                <option>English</option>
+                <option>मराठी</option>
+                <option>हिंदी</option>
+              </select>
+            </div>
+            <input
+              placeholder="Ward"
+              value={form.ward}
+              onChange={(e) => setForm({ ...form, ward: e.target.value })}
+              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs"
+            />
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                disabled={submitting}
+                className="flex-1 bg-indigo-950 text-white rounded-lg py-2 text-xs font-bold disabled:opacity-50"
+              >
+                {submitting ? "Submitting…" : "Submit Grievance"}
+              </button>
+              <button type="button" onClick={() => setShowForm(false)} className="text-xs text-slate-400 px-3">
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
+
+        <div className="flex gap-2 mb-4 mt-4 items-center">
           {["All", "At Risk", "Breached"].map((filter, i) => (
             <button
               key={filter}
@@ -901,15 +1023,15 @@ function GrievanceTriage() {
           </div>
 
           {/* Rows — clicking one loads it into the detail panel on the right */}
-          {GRIEVANCES.map((g) => {
-            const [tone, label] = SLA_DISPLAY[g.sla];
+          {grievances.map((g) => {
+            const [tone, label] = SLA_DISPLAY[g.sla] ?? SLA_DISPLAY.safe;
 
             return (
               <button
                 key={g.id}
-                onClick={() => setSelected(g)}
+                onClick={() => setSelectedId(g.id)}
                 className={`w-full text-left grid grid-cols-[90px_1fr_130px_60px_90px] px-[18px] py-3.5 border-b border-slate-50 items-center transition-colors ${
-                  selected.id === g.id ? "bg-indigo-50/70" : "hover:bg-slate-50"
+                  selectedId === g.id ? "bg-indigo-50/70" : "hover:bg-slate-50"
                 }`}
               >
                 <span className="text-xs font-mono text-indigo-600">{g.id}</span>
@@ -920,7 +1042,7 @@ function GrievanceTriage() {
                   <div className="text-xs text-slate-400">{g.en}</div>
                 </span>
                 <span><Badge>{g.dept}</Badge></span>
-                <span className="text-xs text-slate-400">{g.conf}%</span>
+                <span className="text-xs text-slate-400">{g.conf != null ? `${g.conf}%` : "—"}</span>
                 <span><Badge tone={tone}>{label}</Badge></span>
               </button>
             );
@@ -928,7 +1050,7 @@ function GrievanceTriage() {
         </div>
 
         <div className="text-xs text-slate-400 mt-3">
-          Showing 1–4 of 124 grievances
+          {live ? `Showing ${grievances.length} live grievances` : "Showing 1–4 of 124 grievances"}
         </div>
       </div>
 
@@ -936,17 +1058,21 @@ function GrievanceTriage() {
       <div className="bg-white rounded-[18px] p-[22px] h-fit" style={{ boxShadow: CARD_SHADOW }}>
         <div className="flex items-center justify-between mb-1">
           <span className="font-mono text-sm font-bold text-indigo-600">{selected.id}</span>
-          <Badge tone="blue">TRIAGE</Badge>
+          <Badge tone="blue">{selected.status ? selected.status.toUpperCase() : "TRIAGE"}</Badge>
         </div>
-        <div className="text-xs text-slate-400 mb-4">Submitted 2 hours ago</div>
+        <div className="text-xs text-slate-400 mb-4">
+          {selected.created_at
+            ? `Submitted ${new Date(selected.created_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}`
+            : "Submitted 2 hours ago"}
+        </div>
 
         <div className="text-[11px] font-bold text-slate-400 mb-1">CITIZEN REPORT</div>
         <div className="bg-[#f7f7f9] rounded-xl p-3 mb-2">
           <div className="text-sm font-medium">"{selected.text}"</div>
-          <div className="text-xs text-slate-400 mt-1">🌐 "{selected.en}"</div>
+          {selected.en && <div className="text-xs text-slate-400 mt-1">🌐 "{selected.en}"</div>}
         </div>
         <div className="text-xs text-slate-400 mb-4">
-          📍 {selected.ward} &nbsp;·&nbsp; Anonymized Citizen
+          📍 {selected.ward || "Ward pending"} &nbsp;·&nbsp; Anonymized Citizen
         </div>
 
         <div className="text-[11px] font-bold text-slate-400 mb-2">SYSTEM ANALYSIS</div>
@@ -957,7 +1083,7 @@ function GrievanceTriage() {
           </div>
           <div className="bg-[#f7f7f9] rounded-xl p-2.5">
             <div className="text-[10px] text-slate-400">CONFIDENCE</div>
-            <div className="text-sm font-bold text-indigo-600">{selected.conf}%</div>
+            <div className="text-sm font-bold text-indigo-600">{selected.conf != null ? `${selected.conf}%` : "Pending triage"}</div>
           </div>
         </div>
 
@@ -985,14 +1111,32 @@ function GrievanceTriage() {
           AI recommends. Officer decides.
         </p>
 
-        <button className="w-full bg-indigo-950 text-white rounded-xl py-2.5 text-[13px] font-bold mb-2 hover:bg-indigo-900">
+        {live && !session && (
+          <p className="text-[11px] text-center text-amber-600 mb-2">
+            Officer sign-in required to triage (see sidebar).
+          </p>
+        )}
+
+        <button
+          onClick={() => triageAction("approved")}
+          disabled={live && (!session || actionBusy)}
+          className="w-full bg-indigo-950 text-white rounded-xl py-2.5 text-[13px] font-bold mb-2 hover:bg-indigo-900 disabled:opacity-40"
+        >
           ✓ &nbsp;APPROVE &amp; ASSIGN
         </button>
         <div className="flex gap-2">
-          <button className="flex-1 border border-slate-200 text-slate-500 bg-white rounded-xl py-2 text-xs font-bold hover:bg-slate-50">
+          <button
+            onClick={() => triageAction("reassigned")}
+            disabled={live && (!session || actionBusy)}
+            className="flex-1 border border-slate-200 text-slate-500 bg-white rounded-xl py-2 text-xs font-bold hover:bg-slate-50 disabled:opacity-40"
+          >
             ↻ REASSIGN
           </button>
-          <button className="flex-1 border border-red-200 text-red-600 bg-white rounded-xl py-2 text-xs font-bold hover:bg-red-50">
+          <button
+            onClick={() => triageAction("escalated")}
+            disabled={live && (!session || actionBusy)}
+            className="flex-1 border border-red-200 text-red-600 bg-white rounded-xl py-2 text-xs font-bold hover:bg-red-50 disabled:opacity-40"
+          >
             ↗ ESCALATE
           </button>
         </div>
@@ -1425,11 +1569,95 @@ function Trust() {
 }
 
 
+/* ──────────────────── SECTION 11.5: OFFICER SIGN-IN PANEL ────────────────── */
+
+/** Gates write actions (approve/reassign/escalate) in the Triage Inbox.
+ * Session state lives in the root shell (via Supabase's own auth listener)
+ * and is passed down; this panel only drives sign-in/out. */
+function OfficerAuthPanel({ session }) {
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  if (!supabase) {
+    return (
+      <div className="pt-3.5 px-3 text-[11px] text-slate-400 border-t border-slate-100 mt-2">
+        Nagpur Municipal Corporation<br />Command v2 · Demo data
+      </div>
+    );
+  }
+
+  if (session) {
+    return (
+      <div className="pt-3.5 px-3 border-t border-slate-100 mt-2">
+        <div className="text-[11px] text-slate-400">Signed in as</div>
+        <div className="text-xs font-semibold text-slate-700 truncate mb-2">{session.user.email}</div>
+        <button onClick={() => supabase.auth.signOut()} className="text-[11px] font-bold text-red-600 hover:underline">
+          Sign out
+        </button>
+      </div>
+    );
+  }
+
+  const handleSignIn = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+    setBusy(false);
+    if (signInError) setError(signInError.message);
+    else setOpen(false);
+  };
+
+  return (
+    <div className="pt-3.5 px-3 border-t border-slate-100 mt-2">
+      {!open ? (
+        <button onClick={() => setOpen(true)} className="text-[11px] font-bold text-indigo-600 hover:underline">
+          Officer sign-in →
+        </button>
+      ) : (
+        <form onSubmit={handleSignIn} className="space-y-1.5">
+          <input
+            type="email" required placeholder="Officer email"
+            value={email} onChange={(e) => setEmail(e.target.value)}
+            className="w-full text-xs border border-slate-200 rounded-md px-2 py-1.5"
+          />
+          <input
+            type="password" required placeholder="Password"
+            value={password} onChange={(e) => setPassword(e.target.value)}
+            className="w-full text-xs border border-slate-200 rounded-md px-2 py-1.5"
+          />
+          {error && <div className="text-[10px] text-red-600">{error}</div>}
+          <div className="flex gap-1.5">
+            <button type="submit" disabled={busy} className="flex-1 text-[11px] font-bold bg-indigo-950 text-white rounded-md py-1.5 disabled:opacity-50">
+              {busy ? "Signing in…" : "Sign in"}
+            </button>
+            <button type="button" onClick={() => setOpen(false)} className="text-[11px] text-slate-400 px-2">
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
+
 /* ─────────────────────── SECTION 12: ROOT APP SHELL ──────────────────────── */
 
 export default function NagpurCommand() {
   const [view, setView] = useState("command");        // which screen is showing
   const [openAlert, setOpenAlert] = useState(null);   // null = modal closed
+  const [session, setSession] = useState(null);       // officer auth session, null = signed out
+
+  useEffect(() => {
+    if (!supabase) return;
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => setSession(sess));
+    return () => sub.subscription.unsubscribe();
+  }, []);
 
   return (
     <div className="flex h-screen bg-[#f6f6f8] text-[#0b0b12]" style={{ fontFamily: "'Inter', sans-serif" }}>
@@ -1461,9 +1689,7 @@ export default function NagpurCommand() {
           ))}
         </nav>
 
-        <div className="pt-3.5 px-3 text-[11px] text-slate-400 border-t border-slate-100 mt-2">
-          Nagpur Municipal Corporation<br />Command v2 · Demo data
-        </div>
+        <OfficerAuthPanel session={session} />
       </div>
 
       {/* ── Main area ── */}
@@ -1472,7 +1698,7 @@ export default function NagpurCommand() {
         <div className="flex-1 overflow-y-auto">
           <div key={view} className="page-anim px-11 pt-10 pb-14">
             {view === "command"    && <CommandView onOpenAlert={setOpenAlert} />}
-            {view === "grievances" && <GrievanceTriage />}
+            {view === "grievances" && <GrievanceTriage session={session} />}
             {view === "hotspots"   && <HotspotForecast />}
             {view === "advisory"   && <Advisory />}
             {view === "field"      && <FieldTeams />}
