@@ -20,23 +20,28 @@ Then open the printed `localhost` URL in your browser.
 
 ## GitHub Pages deployment
 
-The root `index.html` served by GitHub Pages is a **standalone, no-build
-version** (React + Babel standalone + Tailwind, all loaded via CDN
-`<script>` tags). It is not the Vite entry point — it doesn't reference
-`/src/main.jsx` or use `<script type="module">`, so the browser can parse
-it directly with no build step. This is what fixed the earlier blank-page
-bug (`Uncaught SyntaxError: Cannot use import statement outside a module`),
-which happened because the previous root `index.html` was the Vite entry
-HTML pushed without running `npm run build` first.
+`index.html` is the standard **Vite entry point** (`<script type="module"
+src="/src/main.jsx">`) — it is never served raw. `.github/workflows/deploy.yml`
+runs on every push to `main`: it does `npm ci && npm run build` and publishes
+the resulting `dist/` folder to GitHub Pages via `actions/deploy-pages`.
 
-Keep it that way: **do not overwrite root `index.html` with the Vite entry
-HTML** unless you also set up a build step (see below).
+This replaced an earlier standalone, no-build `index.html` (React + Babel
+standalone + Tailwind loaded from CDN `<script>` tags) that was fragile
+during a live demo — it depended on `unpkg.com` serving `babel.min.js`,
+`react`, and `react-dom` correctly and transforming JSX in the browser at
+page-load time, and any CDN hiccup produced
+`Uncaught SyntaxError: Cannot use import statement outside a module`.
+The Vite build compiles JSX ahead of time, so the deployed page has no
+runtime CDN or Babel dependency at all.
 
-If you'd rather deploy the real Vite build instead of the standalone file,
-add a GitHub Actions workflow that runs `npm run build` and publishes
-`dist/`, and set `base: '/hackathon-project-for-NAGPUR-MUNICIPAL-CORPORATION/'`
-in `vite.config.js` so built asset paths resolve under the repo's Pages
-subpath.
+**One-time repo setting required:** in GitHub, go to Settings → Pages →
+Build and deployment → Source, and select **"GitHub Actions"** (not
+"Deploy from a branch"). Once set, every push to `main` redeploys
+automatically.
+
+`vite.config.js` sets `base: '/hackathon-project-for-NAGPUR-MUNICIPAL-CORPORATION/'`
+so built asset paths resolve correctly under the repo's Pages subpath —
+this must match the repo name exactly if the repo is ever renamed.
 
 ## Build for local Vite dev
 
@@ -44,17 +49,19 @@ subpath.
 npm run build
 ```
 
-Output goes to `dist/` — deploy that folder to Vercel, Netlify, or any
-static host if you're not using the standalone `index.html` above.
+Output goes to `dist/` (git-ignored) — CI produces this automatically on
+push to `main`. You generally don't need to run this locally except to
+sanity-check a build before pushing.
 
 ## Project structure
 
 ```
-├── index.html          # Standalone CDN build — this is what GitHub Pages serves
-├── src/                 # Vite dev project (for local development only)
-│   ├── main.jsx         # React mount point
-│   ├── App.jsx          # All 6 screens + modal (single component tree)
-│   └── index.css        # Tailwind directives
+├── index.html               # Vite entry HTML — never served raw, only via the build
+├── .github/workflows/deploy.yml  # Builds and deploys dist/ to GitHub Pages
+├── src/
+│   ├── main.jsx              # React mount point
+│   ├── App.jsx                # All 6 screens + modal (single component tree)
+│   └── index.css              # Tailwind directives
 ├── tailwind.config.js
 ├── postcss.config.js
 ├── vite.config.js
@@ -65,8 +72,8 @@ static host if you're not using the standalone `index.html` above.
 
 - React 18 + Vite
 - Tailwind CSS
-- Charts are hand-built inline SVG — no external chart library, no CDN
-  dependency, so it runs reliably offline once installed.
+- Charts are hand-built inline SVG — no external chart library, so nothing
+  extra to fetch beyond the built bundle.
 
 ## Ethics note
 
