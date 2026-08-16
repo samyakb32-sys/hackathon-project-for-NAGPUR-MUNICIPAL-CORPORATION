@@ -217,36 +217,31 @@ const INTERVENTIONS = [
 const ETHICS_SECTIONS = [
   {
     icon: "⚖️",
-    title: "DPDP Act 2023 Compliance",
+    title: "We follow India's data protection law",
     body:
-      "The NMC Command Centre operates in strict adherence to India's Digital Personal " +
-      "Data Protection Act of 2023. Data processing is conducted solely for the purpose " +
-      "of municipal administration and civic service delivery, ensuring unambiguous " +
-      "consent or legitimate civic purpose as defined under the Act.",
+      "We follow India's Digital Personal Data Protection Act of 2023. We only use " +
+      "your data to run city services — never for anything else.",
   },
   {
     icon: "🔻",
-    title: "Data Minimisation",
+    title: "We collect as little as possible",
     body:
-      "Our systems enforce a strict data minimisation policy. We collect only the " +
-      "telemetry, geospatial, and reporting data strictly necessary for municipal " +
-      "operations. Extraneous metadata is automatically discarded at the ingestion layer.",
+      "We only save the information we actually need to fix problems. " +
+      "Anything extra is thrown away right away, not stored.",
   },
   {
     icon: "👁️",
-    title: "Anonymisation",
+    title: "We hide who you are",
     body:
-      "To protect citizen identity, all analytical dashboards and geospatial views employ " +
-      "spatial aggregation and k-anonymity techniques. Individual citizen reports are " +
-      "decoupled from PII before entering predictive models.",
+      "Maps and charts only show group totals, not individual people. " +
+      "A citizen's report is separated from their identity before any computer looks at it.",
   },
   {
     icon: "🤝",
-    title: "Human-in-the-Loop Principle",
+    title: "A person always decides, not the computer",
     body:
-      "Artificial Intelligence and predictive algorithms within the Command Centre are " +
-      "strictly advisory. They surface anomalies, patterns and risk scores — but every " +
-      "routing, dispatch or public advisory action requires explicit officer approval.",
+      "Our computer only points out patterns and possible problems — it never acts on its " +
+      "own. Every dispatch, message, or approval needs a real officer to click \"yes\" first.",
   },
 ];
 
@@ -1579,15 +1574,13 @@ function Trust() {
       {/* LEFT — the compliance sections */}
       <div className="col-span-2">
         <div className="text-xs font-bold text-slate-400 tracking-wide mb-1">
-          COMPLIANCE &amp; GOVERNANCE
+          RULES &amp; TRUST
         </div>
         <h1 className="text-[28px] font-extrabold text-slate-900 mb-3" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
-          Ethics &amp; Legal Position
+          How We Protect Your Privacy
         </h1>
         <p className="text-sm text-slate-500 mb-6 max-w-xl">
-          The Nagpur Municipal Corporation's data governance framework prioritizes citizen
-          privacy, operational transparency, and strictly defined scopes for algorithmic
-          intervention.
+          Here's exactly what we do — and don't do — with your data, in plain words.
         </p>
 
         <div className="grid grid-cols-2 gap-4">
@@ -1608,15 +1601,14 @@ function Trust() {
         <div className="bg-gradient-to-b from-[#1e2233] to-[#12141c] text-white rounded-[18px] p-5">
           <div className="flex items-start gap-2 font-bold mb-3 text-lg leading-tight">
             <span className="text-red-400">🚫</span>
-            <span>What we deliberately did not build</span>
+            <span>Things we chose NOT to build</span>
           </div>
           <p className="text-xs text-slate-300 mb-4 leading-relaxed">
-            In our pursuit of a smart city, we prioritize civil liberties over surveillance
-            capabilities. The following technologies are explicitly excluded from the NMC
-            architecture:
+            We care more about your freedom and privacy than about watching people. We will
+            never add:
           </p>
           <ul className="space-y-2.5 text-sm font-semibold">
-            {["No Facial Recognition", "No Predictive Policing", "No Citizen Profiling"].map((item) => (
+            {["No Facial Recognition", "No Predicting Who Will Commit a Crime", "No Tracking Individual People"].map((item) => (
               <li key={item} className="flex items-center gap-2 text-red-400">
                 <span>✕</span> {item.toUpperCase()}
               </li>
@@ -1625,13 +1617,13 @@ function Trust() {
         </div>
 
         <div className="bg-white rounded-[18px] p-5" style={{ boxShadow: CARD_SHADOW }}>
-          <div className="text-xs font-bold text-slate-400 mb-1">AUDIT TRAIL</div>
+          <div className="text-xs font-bold text-slate-400 mb-1">EVERY ACTION IS RECORDED</div>
           <p className="text-xs text-slate-500 mb-2 leading-relaxed">
-            All data access and algorithmic decisions are immutably logged for periodic
-            review by independent ethics boards.
+            Every time someone looks at data or the computer suggests something, we write it
+            down. Independent reviewers can check this record any time.
           </p>
           <button className="text-xs font-bold text-indigo-600 hover:underline">
-            View Audit Policy →
+            See the Full Record →
           </button>
         </div>
       </div>
