@@ -3,6 +3,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { fetchRainForecast, fetchAQI } from "./lib/liveData.js";
 import { fetchGrievanceTrend } from "./lib/forecast.js";
+import { classifyGrievance } from "./lib/classify.js";
 import { supabase } from "./lib/supabase.js";
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -948,11 +949,20 @@ function GrievanceTriage({ session }) {
     e.preventDefault();
     if (!supabase || !form.text.trim()) return;
     setSubmitting(true);
+
+    // Ask the AI classifier for a department guess + confidence + a
+    // translation, if the citizen didn't already provide one. Never blocks
+    // the submission — on any failure it's just left PENDING REVIEW for an
+    // officer, same as before this existed.
+    const ai = await classifyGrievance(form.text);
+
     const { error } = await supabase.from("grievances").insert({
       text: form.text.trim(),
-      en: form.en.trim() || null,
+      en: form.en.trim() || ai?.english || null,
       ward: form.ward.trim() || null,
       lang: form.lang,
+      dept: ai?.department || "PENDING REVIEW",
+      conf: ai?.confidence ?? null,
     });
     setSubmitting(false);
     if (!error) {
@@ -1040,7 +1050,7 @@ function GrievanceTriage({ session }) {
                 disabled={submitting}
                 className="flex-1 bg-indigo-950 text-white rounded-lg py-2 text-xs font-bold disabled:opacity-50"
               >
-                {submitting ? "Submitting…" : "Submit Grievance"}
+                {submitting ? "AI is reading it…" : "Submit Grievance"}
               </button>
               <button type="button" onClick={() => setShowForm(false)} className="text-xs text-slate-400 px-3">
                 Cancel
