@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Inter+Tight:wght@600;700;800;900&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -5,4 +7,38 @@
 body {
   margin: 0;
   font-family: "Inter", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+@keyframes wordIn {
+  0%   { opacity: 0; transform: translateY(28px); filter: blur(6px); }
+  100% { opacity: 1; transform: translateY(0);     filter: blur(0); }
+}
+
+@keyframes pageIn {
+  0%   { opacity: 0; transform: translateY(16px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulseDot {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+.kinetic-word {
+  animation: wordIn 0.7s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+.page-anim {
+  animation: pageIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pulse-dot {
+  animation: pulseDot 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kinetic-word { animation: none !important; opacity: 1 !important; transform: none !important; filter: none !important; }
+  .page-anim { animation: none !important; }
+  .pulse-dot { animation: none !important; }
 }
