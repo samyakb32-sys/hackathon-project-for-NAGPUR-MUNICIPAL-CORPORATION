@@ -991,7 +991,8 @@ function GrievanceTriage({ session }) {
               Triage Inbox
             </h1>
             <p className="text-sm text-slate-400">
-              Incoming citizen grievances requiring AI verification and officer assignment.
+              Complaints from citizens. The AI reads each one and guesses which department
+              should handle it — an officer checks and approves before anything happens.
               {live ? (
                 <span className="text-emerald-600 font-bold"> ● LIVE · Supabase</span>
               ) : (
