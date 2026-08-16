@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { fetchRainForecast, fetchAQI } from "./lib/liveData.js";
+import { fetchGrievanceTrend } from "./lib/forecast.js";
 import { supabase } from "./lib/supabase.js";
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -1213,6 +1214,7 @@ function GrievanceTriage({ session }) {
 
 function HotspotForecast() {
   const aqiState = useLive(fetchAQI, { pm10: null, aqi: null });
+  const trendState = useLive(fetchGrievanceTrend, FORECAST);
 
   return (
     <div>
@@ -1239,9 +1241,15 @@ function HotspotForecast() {
               <div className="font-bold text-slate-900" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
                 Complaint Volume Forecast
               </div>
-              <div className="text-[11px] text-slate-400">14-Day Trajectory (95% CI)</div>
+              <div className="text-[11px]">
+                {trendState.live ? (
+                  <span className="text-emerald-600 font-bold">● LIVE trend, real grievances</span>
+                ) : (
+                  <span className="text-slate-400">demo data</span>
+                )}
+              </div>
             </div>
-            <LineChart data={FORECAST} height={150} />
+            <LineChart data={trendState.data} height={150} />
           </div>
 
           <div className="bg-white rounded-[20px] p-5" style={{ boxShadow: CARD_SHADOW }}>
