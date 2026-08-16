@@ -395,25 +395,59 @@ function LineChart({ data, height = 150 }) {
   );
 }
 
+// Deterministic PRNG so a given seed always produces the same layout —
+// the map shouldn't reshuffle every time you navigate back to a screen.
+function seededRandom(seedStr) {
+  let h = 1779033703 ^ seedStr.length;
+  for (let i = 0; i < seedStr.length; i++) {
+    h = Math.imul(h ^ seedStr.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  return function next() {
+    h = Math.imul(h ^ (h >>> 16), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+  };
+}
+
+const HEX_COLS = 8;
+
 /**
  * Stylised hexagonal density map standing in for a real H3 geospatial layer.
- * Colours are seeded once via useMemo so they stay stable across re-renders
- * (otherwise the map would flicker every time a parent state changes).
+ *
+ * `seed` makes the layout deterministic per screen (stable across re-renders
+ * and navigation, unlike plain Math.random which reshuffled on every mount).
+ * `focuses` is a list of { col, row, intensity, radius } hotspots that bias
+ * nearby hexes toward red/amber, so each screen's map actually reflects what
+ * it's captioned as (e.g. a dense cluster at the flood-risk ward) instead of
+ * uniform noise that looks identical everywhere.
  */
-function HexMap({ caption }) {
-  const hexColours = useMemo(
-    () =>
-      Array.from({ length: 48 }).map(() => {
-        const r = Math.random();
-        if (r > 0.85) return "#dc2626";  // red    — critical density
-        if (r > 0.65) return "#f59e0b";  // amber  — elevated
-        if (r > 0.40) return "#818cf8";  // indigo — moderate
-        return "#334155";                // slate  — low
-      }),
-    []
-  );
+function HexMap({ caption, seed = "default", focuses = [] }) {
+  const hexColours = useMemo(() => {
+    const rand = seededRandom(seed);
+    return Array.from({ length: 48 }).map((_, i) => {
+      const row = Math.floor(i / HEX_COLS);
+      const col = i % HEX_COLS;
 
-  const COLS = 8;
+      let heat = 0;
+      for (const f of focuses) {
+        const dx = col - f.col;
+        const dy = row - f.row;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const contribution = (f.intensity ?? 1) * Math.max(0, 1 - dist / (f.radius ?? 3));
+        heat = Math.max(heat, contribution);
+      }
+
+      const score = rand() + heat * 0.6;
+      if (score > 0.85) return "#dc2626";  // red    — critical density
+      if (score > 0.65) return "#f59e0b";  // amber  — elevated
+      if (score > 0.40) return "#818cf8";  // indigo — moderate
+      return "#334155";                    // slate  — low
+    });
+  }, [seed, JSON.stringify(focuses)]);
+
+  const COLS = HEX_COLS;
 
   return (
     <div className="relative bg-slate-900 rounded-lg overflow-hidden h-full min-h-[280px] flex items-center justify-center">
@@ -533,7 +567,15 @@ function CommandView({ onOpenAlert }) {
             <span className="text-xs text-slate-400">Ward Filter: All Wards</span>
           </div>
 
-          <HexMap caption="Sitabuldi · Gandhibagh · Lakadganj" />
+          <HexMap
+            caption="Sitabuldi · Gandhibagh · Lakadganj"
+            seed="command-overview"
+            focuses={[
+              { col: 2, row: 2, intensity: 0.9, radius: 3 },
+              { col: 5, row: 1, intensity: 0.6, radius: 2.5 },
+              { col: 6, row: 4, intensity: 0.5, radius: 2 },
+            ]}
+          />
         </div>
 
         {/* Proactive alerts feed */}
@@ -655,7 +697,11 @@ function AlertDetailModal({ alert, onClose, onIssueAdvisory }) {
           {/* RIGHT COLUMN — what the officer can actually do about it */}
           <div>
             <div className="text-xs font-semibold text-slate-500 mb-2">LOCALIZED RISK MAP</div>
-            <HexMap caption="Zoom: Ward Level" />
+            <HexMap
+              caption="Zoom: Ward Level"
+              seed="ambazari-zoom"
+              focuses={[{ col: 4, row: 2, intensity: 1.1, radius: 3.2 }]}
+            />
 
             <div className="text-xs font-semibold text-slate-500 mt-4 mb-2">AVAILABLE FIELD TEAMS</div>
             <div className="flex gap-2 mb-4 flex-wrap">
@@ -876,7 +922,15 @@ function HotspotForecast() {
               ))}
             </div>
           </div>
-          <HexMap caption="Dharampeth 412 · Sitabuldi 185 · Mahal 89" />
+          <HexMap
+            caption="Dharampeth 412 · Sitabuldi 185 · Mahal 89"
+            seed="hotspots-dharampeth"
+            focuses={[
+              { col: 1, row: 2, intensity: 1.0, radius: 2.6 },
+              { col: 5, row: 1, intensity: 0.6, radius: 2 },
+              { col: 6, row: 4, intensity: 0.35, radius: 1.6 },
+            ]}
+          />
         </div>
 
         {/* Two stacked charts */}
@@ -1096,7 +1150,14 @@ function FieldTeams() {
       <div className="grid grid-cols-3 gap-6">
         <div className="col-span-2 space-y-6">
           <div className="bg-white border border-slate-200 rounded-lg p-4">
-            <HexMap caption="RRT-Alpha (On Site) · Drain-Unit 4 (En Route) · Unit 7 (Idle)" />
+            <HexMap
+              caption="RRT-Alpha (On Site) · Drain-Unit 4 (En Route) · Unit 7 (Idle)"
+              seed="field-teams"
+              focuses={[
+                { col: 2, row: 1, intensity: 0.5, radius: 1.4 },
+                { col: 6, row: 3, intensity: 0.4, radius: 1.3 },
+              ]}
+            />
           </div>
 
           {/* Timeline for whichever crew is selected on the right */}
