@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { fetchRainForecast, fetchAQI } from "./lib/liveData.js";
 
 /* ═══════════════════════════════════════════════════════════════════════════
    NAGPUR COMMAND — Civic Foresight Dashboard
@@ -285,6 +286,31 @@ function useCountUp(targets) {
 }
 
 const fmt = (n) => n.toLocaleString("en-IN");
+
+/** Fetches real external data and falls back to seeded demo data if the
+ * request fails (offline, rate-limited) — the dashboard should never break
+ * during a live run just because a public API hiccupped.
+ *
+ * `key` controls when the effect re-runs (e.g. the alert's id) — components
+ * like the alert modal stay mounted with a null payload until opened, so
+ * without a key the fetch would only ever fire once, before real data
+ * exists to fall back to. `fallback` is read via a ref so the catch handler
+ * always uses the fallback current at fetch time, not the one captured when
+ * the effect was set up. */
+function useLive(fetchFn, fallback, key) {
+  const fallbackRef = useRef(fallback);
+  fallbackRef.current = fallback;
+  const [state, setState] = useState({ data: fallback, live: false, loading: true });
+  useEffect(() => {
+    let cancelled = false;
+    fetchFn()
+      .then((data) => { if (!cancelled) setState({ data, live: true, loading: false }); })
+      .catch(() => { if (!cancelled) setState({ data: fallbackRef.current, live: false, loading: false }); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return state;
+}
 
 /**
  * A single KPI card: white, rounded-2xl, soft floating shadow, lifts on hover.
@@ -687,7 +713,15 @@ function CommandView({ onOpenAlert }) {
 /* ────────────────────── SECTION 6: ALERT DETAIL MODAL ────────────────────── */
 
 function AlertDetailModal({ alert, onClose, onIssueAdvisory }) {
+  // Hook must run every render regardless of `alert`, so it's called before
+  // the early return below (real precipitation forecast for Nagpur, falls
+  // back to the alert's seeded rain data if the live fetch fails).
+  const rainState = useLive(fetchRainForecast, alert?.rain ?? [], alert?.id);
+
   if (!alert) return null;   // nothing selected → render nothing
+
+  const rain = rainState.data;
+  const peakBucket = rain.length ? rain.reduce((max, r) => (r.v > max.v ? r : max), rain[0]) : { t: "36h", v: 0 };
 
   return (
     <div className="fixed inset-0 bg-[#0a0a10]/60 flex items-center justify-center z-50 p-6">
@@ -712,17 +746,28 @@ function AlertDetailModal({ alert, onClose, onIssueAdvisory }) {
 
           {/* LEFT COLUMN — the reasoning behind the prediction */}
           <div>
-            <div className="text-[11px] font-bold text-slate-400 mb-2">WEATHER INTELLIGENCE</div>
+            <div className="text-[11px] font-bold text-slate-400 mb-2 flex items-center gap-2">
+              WEATHER INTELLIGENCE
+              {rainState.live ? (
+                <span className="text-emerald-600 font-bold">● LIVE · Open-Meteo</span>
+              ) : (
+                <span className="text-slate-300 font-semibold">demo data</span>
+              )}
+            </div>
             <div className="bg-[#f7f7f9] rounded-2xl p-4">
               <div className="text-[30px] font-extrabold text-indigo-950" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
-                68mm
+                {peakBucket.v}mm
               </div>
-              <div className="text-xs text-slate-400 mb-3">Forecasted in 36h</div>
+              <div className="text-xs text-slate-400 mb-3">
+                {rainState.live
+                  ? `Live forecast, heaviest in the ${peakBucket.t} window`
+                  : "Forecasted in 36h"}
+              </div>
               <BarChart
-                data={alert.rain}
+                data={rain}
                 height={100}
                 highlightMax
-                labels={alert.rain.map((r) => r.t)}
+                labels={rain.map((r) => r.t)}
               />
             </div>
 
@@ -960,6 +1005,8 @@ function GrievanceTriage() {
 /* ─────────────────── SECTION 8: HOTSPOTS & FORECAST SCREEN ───────────────── */
 
 function HotspotForecast() {
+  const aqiState = useLive(fetchAQI, { pm10: null, aqi: null });
+
   return (
     <div>
       <div className="grid grid-cols-2 gap-6 mb-6">
@@ -995,9 +1042,19 @@ function HotspotForecast() {
               <div className="font-bold text-slate-900" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
                 PM10 Air Quality Levels
               </div>
-              <div className="text-[11px] text-red-600 bg-red-50 px-2 py-0.5 rounded-md">
-                Threshold: 60 µg/m³
+              <div className="flex items-center gap-2">
+                {aqiState.live && aqiState.data.pm10 != null && (
+                  <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md">
+                    ● LIVE PM10: {aqiState.data.pm10} µg/m³
+                  </span>
+                )}
+                <div className="text-[11px] text-red-600 bg-red-50 px-2 py-0.5 rounded-md">
+                  Threshold: 60 µg/m³
+                </div>
               </div>
+            </div>
+            <div className="text-[10px] text-slate-300 mb-1">
+              30-day trend below is representative demo data{aqiState.live ? " — live current reading above" : ""}.
             </div>
             <BarChart
               data={PM10}
