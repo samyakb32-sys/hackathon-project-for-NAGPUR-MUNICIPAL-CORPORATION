@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import { fetchRainForecast, fetchAQI } from "./lib/liveData.js";
 import { supabase } from "./lib/supabase.js";
 
@@ -507,58 +509,89 @@ function LineChart({ data, height = 150 }) {
   );
 }
 
-const hexToRgba = (hex, alpha) => {
-  const n = parseInt(hex.slice(1), 16);
-  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-  return `rgba(${r},${g},${b},${alpha})`;
+// Real, approximate coordinates for Nagpur localities named across the app.
+const WARDS = {
+  sitabuldi:  { lat: 21.1462, lng: 79.0790 },
+  gandhibagh: { lat: 21.1544, lng: 79.1119 },
+  lakadganj:  { lat: 21.1602, lng: 79.1197 },
+  dharampeth: { lat: 21.1394, lng: 79.0637 },
+  mahal:      { lat: 21.1489, lng: 79.1050 },
+  ambazari:   { lat: 21.1225, lng: 79.0378 },
+  itwari:     { lat: 21.1531, lng: 79.1114 },
+};
+const NAGPUR_CENTER = [21.1458, 79.0882];
+
+// What each map "layer" button on the Command screen actually shows —
+// three different, real marker sets, not the same map redrawn.
+const COMMAND_LAYER_MARKERS = {
+  "Grievances": [
+    { ward: "sitabuldi", color: "#f43f5e", label: "Sitabuldi — most complaints", size: 16 },
+    { ward: "gandhibagh", color: "#f59e0b", label: "Gandhibagh — some complaints", size: 13 },
+    { ward: "lakadganj", color: "#6366f1", label: "Lakadganj — few complaints", size: 10 },
+  ],
+  "Flood Risk": [
+    { ward: "ambazari", color: "#dc2626", label: "Ambazari — high flood risk", size: 16 },
+    { ward: "sitabuldi", color: "#f59e0b", label: "Sitabuldi — some flood risk", size: 12 },
+    { ward: "dharampeth", color: "#6366f1", label: "Dharampeth — low flood risk", size: 10 },
+  ],
+  "Air Quality": [
+    { ward: "itwari", color: "#dc2626", label: "Itwari — bad air", size: 16 },
+    { ward: "mahal", color: "#f59e0b", label: "Mahal — okay air", size: 12 },
+    { ward: "dharampeth", color: "#6366f1", label: "Dharampeth — good air", size: 10 },
+  ],
 };
 
 /**
- * Dark geospatial panel with soft colour "blooms" and labelled dot markers —
- * standing in for a real H3/ward-level density layer. Unlike an abstract
- * hex grid, every marker names a real ward, so each screen's map actually
- * reflects what it's captioned as instead of looking like generic noise.
+ * A real, interactive map of Nagpur (OpenStreetMap tiles via Leaflet — free,
+ * no API key needed) with coloured markers at real ward coordinates.
+ * `markers`: [{ ward, label, color, size? }]
  */
-function DotMap({ points, caption, height = 280 }) {
-  const blooms = points
-    .map((p) => `radial-gradient(circle at ${p.x} ${p.y}, ${hexToRgba(p.color, p.alpha ?? 0.5)}, ${hexToRgba(p.color, 0)} ${p.radius ?? 40}%)`)
-    .join(", ");
+function NagpurMap({ markers, caption, height = 280, zoom = 12 }) {
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const layerRef = useRef(null);
+
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current) return;
+    const map = L.map(containerRef.current, {
+      center: NAGPUR_CENTER,
+      zoom,
+      scrollWheelZoom: false,
+    });
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 18,
+    }).addTo(map);
+    layerRef.current = L.layerGroup().addTo(map);
+    mapRef.current = map;
+    return () => { map.remove(); mapRef.current = null; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!mapRef.current || !layerRef.current) return;
+    layerRef.current.clearLayers();
+    markers.forEach((m) => {
+      const pos = WARDS[m.ward];
+      if (!pos) return;
+      const size = m.size ?? 14;
+      const icon = L.divIcon({
+        className: "",
+        html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${m.color};border:2px solid white;box-shadow:0 0 0 4px ${m.color}55"></div>`,
+        iconSize: [size, size],
+        iconAnchor: [size / 2, size / 2],
+      });
+      L.marker([pos.lat, pos.lng], { icon })
+        .bindTooltip(m.label, { direction: "top", offset: [0, -size / 2] })
+        .addTo(layerRef.current);
+    });
+  }, [markers]);
 
   return (
-    <div
-      className="relative rounded-2xl overflow-hidden"
-      style={{
-        height,
-        backgroundColor: "#12141c",
-        backgroundImage:
-          "linear-gradient(rgba(255,255,255,.05) 1px,transparent 1px)," +
-          "linear-gradient(90deg,rgba(255,255,255,.05) 1px,transparent 1px)" +
-          (blooms ? `, ${blooms}` : ""),
-        backgroundSize: "26px 26px, 26px 26px" + points.map(() => ", auto").join(""),
-      }}
-    >
-      {points.map((p) => (
-        <div
-          key={p.label}
-          className="absolute flex flex-col items-center"
-          style={{ left: p.x, top: p.y, transform: "translate(-50%,-50%)" }}
-        >
-          <span
-            className="rounded-full block"
-            style={{
-              width: p.size ?? 9,
-              height: p.size ?? 9,
-              background: p.color,
-              boxShadow: `0 0 0 4px ${hexToRgba(p.color, 0.22)}`,
-            }}
-          />
-          <span className="mt-1 text-[11px] text-white bg-black/50 px-1.5 py-0.5 rounded whitespace-nowrap">
-            {p.label}
-          </span>
-        </div>
-      ))}
+    <div className="relative rounded-2xl overflow-hidden" style={{ height }}>
+      <div ref={containerRef} className="w-full h-full" />
       {caption && (
-        <div className="absolute bottom-3 left-3 text-[11px] text-slate-300 bg-black/40 px-2 py-1 rounded">
+        <div className="absolute bottom-3 left-3 z-[1000] text-[11px] text-slate-700 bg-white/90 px-2 py-1 rounded shadow">
           {caption}
         </div>
       )}
@@ -600,19 +633,22 @@ function CommandView({ onOpenAlert }) {
       {/* Kinetic hero headline */}
       <div className="pb-9 mb-9 border-b border-slate-100">
         <div className="text-xs font-bold tracking-[0.12em] text-indigo-600 mb-3.5">
-          COMMAND CENTER — LIVE FORECAST
+          TODAY'S FORECAST FOR NAGPUR
         </div>
         <KineticHeadline
           words={[
             { text: "188", color: "#4338ca" },
-            { text: "predicted." },
-            { text: "Zero", break: true },
-            { text: "surprises." },
+            { text: "problems", break: true },
+            { text: "found", },
+            { text: "before", break: true },
+            { text: "they", },
+            { text: "happen." },
           ]}
         />
         <p className="text-[17px] leading-relaxed text-slate-500 max-w-xl mt-4">
-          SLA breaches, floods and air-quality spikes are forecast days before residents feel
-          them. Every dispatch and advisory still needs an officer's sign-off.
+          This tool looks for floods, bad air, and slow complaints before they get worse — and
+          warns the team early. A human officer always makes the final decision; the computer
+          only suggests.
         </p>
       </div>
 
@@ -646,14 +682,7 @@ function CommandView({ onOpenAlert }) {
             <span className="text-xs text-slate-400">Ward Filter: All Wards</span>
           </div>
 
-          <DotMap
-            caption={`${mapLayer} layer`}
-            points={[
-              { x: "25%", y: "33%", color: "#f43f5e", label: "Sitabuldi", size: 9 },
-              { x: "62%", y: "17%", color: "#f59e0b", label: "Gandhibagh", size: 8 },
-              { x: "75%", y: "67%", color: "#6366f1", label: "Lakadganj", size: 7 },
-            ]}
-          />
+          <NagpurMap caption={`Showing: ${mapLayer}`} markers={COMMAND_LAYER_MARKERS[mapLayer]} />
         </div>
 
         {/* Proactive alerts feed */}
@@ -799,11 +828,12 @@ function AlertDetailModal({ alert, onClose, onIssueAdvisory }) {
 
           {/* RIGHT COLUMN — what the officer can actually do about it */}
           <div>
-            <div className="text-[11px] font-bold text-slate-400 mb-2">LOCALIZED RISK MAP</div>
-            <DotMap
-              caption="Zoom: Ward Level"
+            <div className="text-[11px] font-bold text-slate-400 mb-2">WHERE THIS IS HAPPENING</div>
+            <NagpurMap
+              caption="Ambazari, Nagpur"
               height={220}
-              points={[{ x: "50%", y: "33%", color: "#f43f5e", label: "Ambazari · Ward Level", size: 10 }]}
+              zoom={14}
+              markers={[{ ward: "ambazari", color: "#dc2626", label: "Ambazari — flood risk here", size: 18 }]}
             />
 
             <div className="text-[11px] font-bold text-slate-400 mt-4 mb-2">AVAILABLE FIELD TEAMS</div>
@@ -1158,13 +1188,13 @@ function HotspotForecast() {
         {/* Spatial clusters */}
         <div className="bg-white rounded-[20px] p-5" style={{ boxShadow: CARD_SHADOW }}>
           <div className="font-bold text-slate-900 mb-3" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
-            Spatial Intelligence
+            Where Problems Are
           </div>
-          <DotMap
-            points={[
-              { x: "12%", y: "33%", color: "#f43f5e", label: "Dharampeth · 412", size: 9 },
-              { x: "62%", y: "17%", color: "#f59e0b", label: "Sitabuldi · 185", size: 8 },
-              { x: "75%", y: "67%", color: "#6366f1", label: "Mahal · 89", size: 7 },
+          <NagpurMap
+            markers={[
+              { ward: "dharampeth", color: "#f43f5e", label: "Dharampeth — 412 complaints", size: 16 },
+              { ward: "sitabuldi", color: "#f59e0b", label: "Sitabuldi — 185 complaints", size: 13 },
+              { ward: "mahal", color: "#6366f1", label: "Mahal — 89 complaints", size: 10 },
             ]}
           />
         </div>
@@ -1398,11 +1428,11 @@ function FieldTeams() {
       <div className="grid grid-cols-3 gap-6">
         <div className="col-span-2 space-y-6">
           <div className="bg-white rounded-[20px] p-5" style={{ boxShadow: CARD_SHADOW }}>
-            <DotMap
+            <NagpurMap
               height={260}
-              points={[
-                { x: "25%", y: "17%", color: "#6366f1", label: "RRT-Alpha · On Site", size: 9 },
-                { x: "75%", y: "50%", color: "#6366f1", label: "Drain-Unit 4 · En Route", size: 8 },
+              markers={[
+                { ward: "ambazari", color: "#6366f1", label: "RRT-Alpha — on site, Ambazari", size: 16 },
+                { ward: "sitabuldi", color: "#6366f1", label: "Drain-Unit 4 — on the way, Sitabuldi", size: 13 },
               ]}
             />
           </div>
