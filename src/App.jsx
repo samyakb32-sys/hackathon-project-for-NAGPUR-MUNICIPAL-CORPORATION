@@ -415,6 +415,36 @@ function Badge({ children, tone = "slate" }) {
 }
 
 /**
+ * Consistent page header used at the top of every screen — a small
+ * indigo eyebrow label, a bold heading, an optional trailing badge
+ * (e.g. a live-status chip), and an optional subtitle. Keeps the same
+ * visual weight/rhythm across screens instead of each one improvising
+ * its own heading size and spacing.
+ */
+function ScreenHeader({ eyebrow, title, subtitle, badge, action }) {
+  return (
+    <div className="mb-6">
+      {eyebrow && (
+        <div className="text-xs font-bold tracking-[0.12em] text-indigo-600 mb-2">{eyebrow}</div>
+      )}
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap">
+          <h1
+            className="text-[28px] font-extrabold text-slate-900"
+            style={{ fontFamily: "'Inter Tight', sans-serif" }}
+          >
+            {title}
+          </h1>
+          {badge}
+        </div>
+        {action}
+      </div>
+      {subtitle && <p className="text-sm text-slate-400 mt-1.5 max-w-2xl">{subtitle}</p>}
+    </div>
+  );
+}
+
+/**
  * Hero headline where each word fades/blurs in with a staggered delay —
  * the "kinetic" entrance used on the Command screen.
  */
@@ -1081,6 +1111,7 @@ function GrievanceTriage({ session, onOpenAuth }) {
       <div className="col-span-2">
         <div className="flex items-start justify-between mb-1">
           <div>
+            <div className="text-xs font-bold tracking-[0.12em] text-indigo-600 mb-2">CITIZEN GRIEVANCES</div>
             <h1 className="text-[28px] font-extrabold text-slate-900" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
               Triage Inbox
             </h1>
@@ -1337,6 +1368,16 @@ function HotspotForecast() {
 
   return (
     <div>
+      <ScreenHeader
+        eyebrow="PREDICTIVE ANALYTICS"
+        title="Hotspots & Forecast"
+        subtitle="Where problems are clustering, and where complaint volume is headed next."
+        badge={
+          (aqiState.live || trendState.live) && (
+            <Badge tone="green">● LIVE DATA</Badge>
+          )
+        }
+      />
       <div className="grid grid-cols-2 gap-6 mb-6">
 
         {/* Spatial clusters */}
@@ -1612,6 +1653,11 @@ function FieldTeams() {
 
   return (
     <div>
+      <ScreenHeader
+        eyebrow="LIVE DEPLOYMENT"
+        title="Field Teams"
+        subtitle="Where crews are right now, and what's still waiting to be assigned."
+      />
       <div className="grid grid-cols-4 gap-5 mb-6">
         <StatCard label="Teams Deployed" value={counts[0]} sub="+2 from shift start" tone="neutral" />
         <StatCard label="Tasks In Progress" value={counts[1]} sub="-4 pending" tone="down" />
