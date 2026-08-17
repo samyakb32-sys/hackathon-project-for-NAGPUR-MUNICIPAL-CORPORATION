@@ -350,6 +350,53 @@ function StatCard({ label, value, suffix, sub, tone = "neutral", accent = false 
   );
 }
 
+/**
+ * Semi-circular gauge — a tick-mark arc filling clockwise to `value`
+ * percent, with the percentage in the middle. Used wherever a single
+ * live reading (AQI, SLA risk) benefits from an at-a-glance dial instead
+ * of just a number.
+ */
+function Gauge({ value, color = "#4338ca", showLabels = false, min = "0", max = "100" }) {
+  const clamped = Math.max(0, Math.min(100, value));
+  const ticks = 40;
+  const activeCount = Math.round((clamped / 100) * ticks);
+  const cx = 100, cy = 100, rOuter = 80, rInner = 70;
+
+  const tickEls = Array.from({ length: ticks }, (_, i) => {
+    const angle = Math.PI + (i / (ticks - 1)) * Math.PI; // sweep π → 2π
+    const x1 = cx + rInner * Math.cos(angle);
+    const y1 = cy + rInner * Math.sin(angle);
+    const x2 = cx + rOuter * Math.cos(angle);
+    const y2 = cy + rOuter * Math.sin(angle);
+    return (
+      <line
+        key={i}
+        x1={x1} y1={y1} x2={x2} y2={y2}
+        stroke={i < activeCount ? color : "#e2e2e7"}
+        strokeWidth="2.5"
+        strokeLinecap="round"
+      />
+    );
+  });
+
+  return (
+    <div>
+      <svg viewBox="0 0 200 120" className="w-full" style={{ maxWidth: 220, margin: "0 auto", display: "block" }}>
+        {tickEls}
+        <text x={cx} y="105" textAnchor="middle" fontSize="22" fontWeight="700" fill="#1a1a22">
+          {clamped}%
+        </text>
+      </svg>
+      {showLabels && (
+        <div className="flex justify-between text-[11px] text-slate-400 px-2" style={{ maxWidth: 220, margin: "0 auto" }}>
+          <span>{min}</span>
+          <span>{max}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** A small coloured label pill. */
 function Badge({ children, tone = "slate" }) {
   const toneStyles = {
@@ -1343,6 +1390,15 @@ function HotspotForecast() {
             <div className="text-[10px] text-slate-300 mb-1">
               30-day trend below is representative demo data{aqiState.live ? " — live current reading above" : ""}.
             </div>
+            {aqiState.live && aqiState.data.pm10 != null && (
+              <div className="mb-2 -mt-1">
+                <Gauge
+                  value={Math.round((aqiState.data.pm10 / 60) * 100)}
+                  color={aqiState.data.pm10 > 60 ? "#dc2626" : "#4338ca"}
+                />
+                <div className="text-center text-[11px] text-slate-400 -mt-2">% of NCAP threshold, live</div>
+              </div>
+            )}
             <BarChart
               data={PM10}
               height={150}
@@ -1895,7 +1951,18 @@ export default function NagpurCommand() {
   }, []);
 
   return (
-    <div className="flex h-screen bg-[#f6f6f8] text-[#0b0b12]" style={{ fontFamily: "'Inter', sans-serif" }}>
+    <div
+      className="flex h-screen text-[#0b0b12]"
+      style={{
+        fontFamily: "'Inter', sans-serif",
+        backgroundColor: "#f6f6f8",
+        backgroundImage:
+          "radial-gradient(60vw 60vh at 8% -5%, rgba(99,102,241,0.10), transparent 60%)," +
+          "radial-gradient(50vw 50vh at 100% 10%, rgba(139,92,246,0.08), transparent 55%)," +
+          "radial-gradient(45vw 45vh at 20% 110%, rgba(67,56,202,0.06), transparent 55%)",
+        backgroundAttachment: "fixed",
+      }}
+    >
 
       {/* ── Sidebar ── */}
       <div className="w-[236px] bg-white border-r border-slate-100 flex flex-col flex-shrink-0 py-7 px-4">
