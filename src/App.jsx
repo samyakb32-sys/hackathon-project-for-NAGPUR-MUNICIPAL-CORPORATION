@@ -9,8 +9,8 @@ import { fetchSiteContent, SITE_CONTENT_DEFAULTS } from "./lib/siteContent.js";
 import { supabase } from "./lib/supabase.js";
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   NAGPUR COMMAND — Civic Foresight Dashboard
-   AI-Powered Integrated Urban Intelligence & Proactive Governance
+   DRISHTI — Nagpur Civic Foresight Dashboard
+   Data-driven Response & Intelligence System for Timely Interventions
 
    Single-page app. Sidebar navigation switches between 6 sections.
    The Ambazari alert on the Command screen opens a detail modal.
@@ -2993,10 +2993,10 @@ export default function NagpurCommand() {
       <div className="w-[236px] bg-white border-r border-slate-100 flex flex-col flex-shrink-0 py-7 px-4">
         <div className="px-3 pb-[30px]">
           <div className="font-extrabold text-[19px] tracking-tight" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
-            NAGPUR
+            DRISHTI
           </div>
           <div className="text-[11px] font-bold tracking-[0.14em] text-indigo-600 mt-0.5">
-            COMMAND CENTER
+            NAGPUR CIVIC INTELLIGENCE
           </div>
         </div>
 
@@ -3024,7 +3024,7 @@ export default function NagpurCommand() {
         </nav>
 
         <div className="pt-3.5 px-3 text-[11px] text-slate-400 border-t border-slate-100 mt-2">
-          Nagpur Municipal Corporation<br />Command v2 · Demo data
+          Nagpur Municipal Corporation<br />Drishti v1 · Demo data
         </div>
       </div>
 
