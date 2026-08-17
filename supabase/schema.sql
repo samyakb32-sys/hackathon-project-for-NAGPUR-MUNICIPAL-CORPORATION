@@ -168,3 +168,54 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+
+-- Nagpur Command — officer-only permissions
+--
+-- Tightens grievances/teams from "any signed-in user" to "only officers"
+-- for triage/roster changes, adds delete, and stops blocked citizens from
+-- submitting new grievances. Tags each grievance with its submitter (used
+-- to enforce the block, and later to notify that citizen of updates).
+
+alter table public.grievances add column if not exists user_id uuid references auth.users(id);
+
+drop policy if exists "signed-in users can insert grievances" on public.grievances;
+create policy "signed-in users can insert grievances"
+  on public.grievances for insert
+  to authenticated
+  with check (
+    (user_id is null or user_id = auth.uid())
+    and not exists (select 1 from public.profiles where id = auth.uid() and blocked = true)
+  );
+
+drop policy if exists "officers can update grievances" on public.grievances;
+create policy "officers can update grievances"
+  on public.grievances for update
+  to authenticated
+  using (public.is_officer())
+  with check (true);
+
+drop policy if exists "officers can delete grievances" on public.grievances;
+create policy "officers can delete grievances"
+  on public.grievances for delete
+  to authenticated
+  using (public.is_officer());
+
+drop policy if exists "officers can insert teams" on public.teams;
+create policy "officers can insert teams"
+  on public.teams for insert
+  to authenticated
+  with check (public.is_officer());
+
+drop policy if exists "officers can update teams" on public.teams;
+create policy "officers can update teams"
+  on public.teams for update
+  to authenticated
+  using (public.is_officer())
+  with check (public.is_officer());
+
+drop policy if exists "officers can delete teams" on public.teams;
+create policy "officers can delete teams"
+  on public.teams for delete
+  to authenticated
+  using (public.is_officer());
