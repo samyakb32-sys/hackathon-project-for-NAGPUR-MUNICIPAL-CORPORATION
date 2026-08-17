@@ -28,6 +28,7 @@ const NAV = [
   { id: "hotspots",   label: "Hotspots & Forecast" },
   { id: "advisory",   label: "Advisory" },
   { id: "field",      label: "Field Teams" },
+  { id: "officer",    label: "Officer Console" },
   { id: "trust",      label: "Trust" },
 ];
 
@@ -37,6 +38,7 @@ const SCREEN_TITLES = {
   hotspots: "Hotspots & Forecast",
   advisory: "Advisory Composer",
   field: "Field Teams",
+  officer: "Officer Console",
   trust: "Trust & Ethics",
 };
 
@@ -1796,6 +1798,229 @@ function FieldTeams() {
 }
 
 
+/* ─────────────────── SECTION 10.5: OFFICER CONSOLE SCREEN ────────────────── */
+
+function OfficerConsole({ session, onOpenAuth }) {
+  const [grievances, setGrievances] = useState(GRIEVANCES);
+  const [live, setLive] = useState(false);
+  const [autoMode, setAutoMode] = useState(() => localStorage.getItem("nc-ai-auto-mode") === "1");
+  const [threshold, setThreshold] = useState(90);
+  const [autoLog, setAutoLog] = useState([]); // ids auto-approved this session
+  const [busyId, setBusyId] = useState(null);
+  const [actionError, setActionError] = useState("");
+
+  const loadGrievances = async () => {
+    if (!supabase) return;
+    const { data, error } = await supabase
+      .from("grievances")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (!error && data && data.length) {
+      const mapped = data.map((g) => ({
+        ...g,
+        id: `#GR-${String(g.id).padStart(4, "0")}`,
+        rawId: g.id,
+      }));
+      setGrievances(mapped);
+      setLive(true);
+    }
+  };
+
+  useEffect(() => { loadGrievances(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => { localStorage.setItem("nc-ai-auto-mode", autoMode ? "1" : "0"); }, [autoMode]);
+
+  // Auto-approves anything above the confidence threshold whenever the
+  // pending list, toggle, or threshold changes — no separate polling loop.
+  // Below the threshold always waits for the officer, no matter what.
+  useEffect(() => {
+    if (!autoMode || !live || !session || !supabase) return;
+    const qualifying = grievances.filter(
+      (g) => (g.status === "new" || !g.status) && g.conf != null && g.conf >= threshold
+    );
+    if (qualifying.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      for (const g of qualifying) {
+        const { error } = await supabase.from("grievances").update({ status: "approved" }).eq("id", g.rawId);
+        if (!error && !cancelled) {
+          setAutoLog((cur) => [{ id: g.id, dept: g.dept, conf: g.conf, at: Date.now() }, ...cur].slice(0, 20));
+        }
+      }
+      if (!cancelled) await loadGrievances();
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoMode, threshold, live, session, grievances]);
+
+  const decide = async (g, status) => {
+    if (!supabase || !session) return;
+    setBusyId(g.id);
+    setActionError("");
+    const { error } = await supabase.from("grievances").update({ status }).eq("id", g.rawId);
+    if (error) {
+      setActionError(error.message);
+    } else {
+      setGrievances((cur) => cur.map((x) => (x.id === g.id ? { ...x, status } : x)));
+      await loadGrievances();
+    }
+    setBusyId(null);
+  };
+
+  const pending = grievances.filter((g) => g.status === "new" || !g.status);
+  // When auto-triage is off, nothing gets auto-approved, so every pending
+  // item needs a manual decision — only exclude the high-confidence ones
+  // once auto-triage is actually on and handling them.
+  const needsReview = pending.filter(
+    (g) => !autoMode || !(g.conf != null && g.conf >= threshold)
+  );
+
+  if (!supabase) {
+    return (
+      <ScreenHeader
+        eyebrow="OFFICER CONSOLE"
+        title="Officer Console"
+        subtitle="Backend not configured — connect Supabase to enable officer sign-in and AI-assisted decisions."
+      />
+    );
+  }
+
+  return (
+    <div>
+      <ScreenHeader
+        eyebrow="OFFICER CONSOLE"
+        title="Officer Console"
+        subtitle="Sign in to review AI predictions. Turn on auto-triage to let high-confidence predictions get approved automatically — everything else still waits for you."
+        badge={live ? <Badge tone="green">● LIVE</Badge> : <Badge tone="slate">demo data</Badge>}
+      />
+
+      {!session ? (
+        <div className="bg-white rounded-[18px] p-8 text-center" style={{ boxShadow: CARD_SHADOW }}>
+          <div className="text-sm text-slate-500 mb-4">Sign in as an officer to review and decide on grievances.</div>
+          <button
+            onClick={onOpenAuth}
+            className="bg-indigo-950 text-white rounded-xl px-5 py-2.5 text-sm font-bold hover:bg-indigo-900"
+          >
+            Sign In / Sign Up
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="bg-white rounded-[18px] p-5 mb-6 flex items-center justify-between gap-6 flex-wrap" style={{ boxShadow: CARD_SHADOW }}>
+            <div>
+              <div className="text-sm font-bold text-slate-900 mb-0.5">AI Auto-Triage</div>
+              <div className="text-xs text-slate-400 max-w-md">
+                When on, grievances the AI is at least {threshold}% confident about are approved
+                automatically. Everything below that always waits for you.
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 text-xs text-slate-500">
+                Threshold
+                <input
+                  type="range"
+                  min="70"
+                  max="99"
+                  value={threshold}
+                  onChange={(e) => setThreshold(Number(e.target.value))}
+                  className="w-28 accent-indigo-600"
+                />
+                <span className="font-bold text-indigo-600 w-9">{threshold}%</span>
+              </label>
+              <button
+                onClick={() => setAutoMode((v) => !v)}
+                aria-pressed={autoMode}
+                className={`w-14 h-8 rounded-full relative transition-colors ${autoMode ? "bg-emerald-500" : "bg-slate-200"}`}
+              >
+                <span
+                  className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-transform ${autoMode ? "translate-x-7" : "translate-x-1"}`}
+                />
+              </button>
+            </div>
+          </div>
+
+          {actionError && (
+            <div className="text-xs text-red-600 mb-4">Couldn't save: {actionError}</div>
+          )}
+
+          <div className="grid grid-cols-2 gap-6">
+            <div>
+              <div className="text-[11px] font-bold text-slate-400 mb-2">
+                NEEDS YOUR DECISION ({needsReview.length})
+              </div>
+              <div className="space-y-2">
+                {needsReview.map((g) => (
+                  <div key={g.id} className="bg-white rounded-xl p-3.5" style={{ boxShadow: CARD_SHADOW }}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-mono text-xs text-indigo-600">{g.id}</span>
+                      <span className="text-xs text-slate-400">
+                        {g.conf != null ? `${g.conf}% conf.` : "no AI read"}
+                      </span>
+                    </div>
+                    <div className="text-sm text-slate-800 mb-0.5">{g.text}</div>
+                    {g.en && <div className="text-xs text-slate-400 mb-2">{g.en}</div>}
+                    <div className="flex gap-1.5">
+                      <button
+                        onClick={() => decide(g, "approved")}
+                        disabled={busyId === g.id}
+                        className="flex-1 bg-indigo-950 text-white rounded-lg py-1.5 text-[11px] font-bold hover:bg-indigo-900 disabled:opacity-40"
+                      >
+                        Approve
+                      </button>
+                      <button
+                        onClick={() => decide(g, "reassigned")}
+                        disabled={busyId === g.id}
+                        className="flex-1 border border-slate-200 text-slate-500 rounded-lg py-1.5 text-[11px] font-bold hover:bg-slate-50 disabled:opacity-40"
+                      >
+                        Reassign
+                      </button>
+                      <button
+                        onClick={() => decide(g, "escalated")}
+                        disabled={busyId === g.id}
+                        className="flex-1 border border-red-200 text-red-600 rounded-lg py-1.5 text-[11px] font-bold hover:bg-red-50 disabled:opacity-40"
+                      >
+                        Escalate
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {needsReview.length === 0 && (
+                  <div className="text-sm text-slate-400 text-center py-8">Nothing waiting on you right now.</div>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <div className="text-[11px] font-bold text-slate-400 mb-2">
+                AUTO-APPROVED BY AI ({autoLog.length}{!autoMode && " · auto-triage is off"})
+              </div>
+              <div className="space-y-2">
+                {autoLog.map((entry) => (
+                  <div key={entry.id + entry.at} className="bg-emerald-50/60 border border-emerald-100 rounded-xl p-3 flex items-center justify-between">
+                    <div>
+                      <span className="font-mono text-xs text-emerald-700">{entry.id}</span>
+                      <span className="text-xs text-slate-500 ml-2">{entry.dept}</span>
+                    </div>
+                    <span className="text-xs font-bold text-emerald-700">{entry.conf}%</span>
+                  </div>
+                ))}
+                {autoLog.length === 0 && (
+                  <div className="text-sm text-slate-400 text-center py-8">
+                    {autoMode
+                      ? "No high-confidence grievances to auto-approve yet."
+                      : "Turn on auto-triage to see what it would approve."}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+
 /* ──────────────────────── SECTION 11: TRUST SCREEN ───────────────────────── */
 
 function Trust() {
@@ -2069,6 +2294,7 @@ export default function NagpurCommand() {
             {view === "hotspots"   && <HotspotForecast />}
             {view === "advisory"   && <Advisory />}
             {view === "field"      && <FieldTeams />}
+            {view === "officer"    && <OfficerConsole session={session} onOpenAuth={() => setAuthOpen(true)} />}
             {view === "trust"      && <Trust />}
           </div>
         </div>
