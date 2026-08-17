@@ -644,7 +644,7 @@ function TopBar({ title, session, onOpenAuth }) {
               {session.user.email[0].toUpperCase()}
             </button>
             {menuOpen && (
-              <div className="absolute right-0 top-11 bg-white rounded-xl border border-slate-100 p-3 w-56 z-50" style={{ boxShadow: CARD_SHADOW }}>
+              <div className="absolute right-0 top-11 bg-white rounded-xl border border-slate-100 p-3 w-56 z-[1100]" style={{ boxShadow: CARD_SHADOW }}>
                 <div className="text-[11px] text-slate-400">Signed in as</div>
                 <div className="text-sm font-semibold text-slate-800 truncate mb-3">{session.user.email}</div>
                 <button
@@ -675,6 +675,8 @@ function TopBar({ title, session, onOpenAuth }) {
 function CommandView({ onOpenAlert }) {
   const counts = useCountUp([2431, 188, 7, 16]);
   const [mapLayer, setMapLayer] = useState("Grievances");
+  const [dismissedAlerts, setDismissedAlerts] = useState([]);
+  const visibleAlerts = ALERTS.filter((a) => !dismissedAlerts.includes(a.id));
 
   return (
     <div>
@@ -739,11 +741,14 @@ function CommandView({ onOpenAlert }) {
             <div className="font-bold text-slate-900" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
               Proactive Alerts
             </div>
-            <Badge tone="blue">3 New</Badge>
+            <Badge tone="blue">{visibleAlerts.length} New</Badge>
           </div>
 
           <div className="space-y-2.5">
-            {ALERTS.map((alert) => {
+            {visibleAlerts.length === 0 && (
+              <p className="text-sm text-slate-400 text-center py-6">No active alerts.</p>
+            )}
+            {visibleAlerts.map((alert) => {
               const tone =
                 alert.level === "CRITICAL" ? "red" :
                 alert.level === "WARNING"  ? "amber" : "slate";
@@ -769,7 +774,10 @@ function CommandView({ onOpenAlert }) {
                     >
                       ASSIGN
                     </button>
-                    <button className="text-xs font-bold border border-slate-200 text-slate-500 bg-white px-3.5 py-1.5 rounded-[9px] hover:bg-slate-50">
+                    <button
+                      onClick={() => setDismissedAlerts((cur) => [...cur, alert.id])}
+                      className="text-xs font-bold border border-slate-200 text-slate-500 bg-white px-3.5 py-1.5 rounded-[9px] hover:bg-slate-50"
+                    >
                       DISMISS
                     </button>
                   </div>
@@ -795,6 +803,8 @@ function AlertDetailModal({ alert, onClose, onIssueAdvisory }) {
   // the early return below (real precipitation forecast for Nagpur, falls
   // back to the alert's seeded rain data if the live fetch fails).
   const rainState = useLive(fetchRainForecast, alert?.rain ?? [], alert?.id);
+  const [assigned, setAssigned] = useState(false);
+  useEffect(() => { setAssigned(false); }, [alert?.id]);
 
   if (!alert) return null;   // nothing selected → render nothing
 
@@ -802,7 +812,7 @@ function AlertDetailModal({ alert, onClose, onIssueAdvisory }) {
   const peakBucket = rain.length ? rain.reduce((max, r) => (r.v > max.v ? r : max), rain[0]) : { t: "36h", v: 0 };
 
   return (
-    <div className="fixed inset-0 bg-[#0a0a10]/60 flex items-center justify-center z-50 p-6">
+    <div className="fixed inset-0 bg-[#0a0a10]/60 flex items-center justify-center z-[1100] p-6">
       <div
         className="bg-white rounded-3xl max-w-4xl w-full max-h-[90vh] overflow-y-auto"
         style={{ boxShadow: "0 40px 80px -20px rgba(0,0,0,.35)" }}
@@ -814,7 +824,7 @@ function AlertDetailModal({ alert, onClose, onIssueAdvisory }) {
               ALERT DETAIL: AMBAZARI FLOOD RISK (CRITICAL)
             </div>
             <div className="text-xs opacity-90 mt-1">
-              Ward ID: {alert.wardId} &nbsp;|&nbsp; Priority: {alert.priority} &nbsp;|&nbsp; Status: {alert.status}
+              Ward ID: {alert.wardId} &nbsp;|&nbsp; Priority: {alert.priority} &nbsp;|&nbsp; Status: {assigned ? "Assigned" : alert.status}
             </div>
           </div>
           <button onClick={onClose} className="text-2xl leading-none hover:opacity-70">×</button>
@@ -895,8 +905,12 @@ function AlertDetailModal({ alert, onClose, onIssueAdvisory }) {
               ))}
             </div>
 
-            <button className="w-full bg-indigo-950 text-white rounded-xl py-3 text-[13px] font-bold mb-2 hover:bg-indigo-900">
-              ➤ &nbsp;ASSIGN RAPID RESPONSE TEAM
+            <button
+              onClick={() => setAssigned(true)}
+              disabled={assigned}
+              className="w-full bg-indigo-950 text-white rounded-xl py-3 text-[13px] font-bold mb-2 hover:bg-indigo-900 disabled:opacity-50"
+            >
+              {assigned ? "✓ TEAM ASSIGNED" : <>➤ &nbsp;ASSIGN RAPID RESPONSE TEAM</>}
             </button>
 
             {/* Jumps the user to the Advisory screen — this is the
@@ -941,6 +955,9 @@ function GrievanceTriage({ session, onOpenAuth }) {
   const [form, setForm] = useState({ text: "", en: "", ward: "", lang: "English" });
   const [submitting, setSubmitting] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
+  const [slaFilter, setSlaFilter] = useState("All");
+  const [deptFilter, setDeptFilter] = useState("All Departments");
+  const [wardFilter, setWardFilter] = useState("All Wards");
 
   const loadGrievances = async () => {
     if (!supabase) return;
@@ -963,6 +980,17 @@ function GrievanceTriage({ session, onOpenAuth }) {
   useEffect(() => { loadGrievances(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
   const selected = grievances.find((g) => g.id === selectedId) || grievances[0];
+
+  const departments = ["All Departments", ...new Set(grievances.map((g) => g.dept).filter(Boolean))];
+  const wards = ["All Wards", ...new Set(grievances.map((g) => g.ward).filter(Boolean))];
+
+  const filteredGrievances = grievances.filter((g) => {
+    if (slaFilter === "At Risk" && g.sla !== "risk") return false;
+    if (slaFilter === "Breached" && g.sla !== "breached") return false;
+    if (deptFilter !== "All Departments" && g.dept !== deptFilter) return false;
+    if (wardFilter !== "All Wards" && g.ward !== wardFilter) return false;
+    return true;
+  });
 
   const submitGrievance = async (e) => {
     e.preventDefault();
@@ -1083,11 +1111,12 @@ function GrievanceTriage({ session, onOpenAuth }) {
         )}
 
         <div className="flex gap-2 mb-4 mt-4 items-center">
-          {["All", "At Risk", "Breached"].map((filter, i) => (
+          {["All", "At Risk", "Breached"].map((filter) => (
             <button
               key={filter}
+              onClick={() => setSlaFilter(filter)}
               className={`text-xs font-bold px-3.5 py-1.5 rounded-[10px] ${
-                i === 0
+                slaFilter === filter
                   ? "bg-indigo-950 text-white"
                   : "text-slate-500 hover:bg-slate-50"
               }`}
@@ -1096,11 +1125,19 @@ function GrievanceTriage({ session, onOpenAuth }) {
             </button>
           ))}
 
-          <select className="text-xs border border-slate-200 rounded-[10px] px-2.5 py-1.5 ml-auto text-slate-500">
-            <option>All Departments</option>
+          <select
+            value={deptFilter}
+            onChange={(e) => setDeptFilter(e.target.value)}
+            className="text-xs border border-slate-200 rounded-[10px] px-2.5 py-1.5 ml-auto text-slate-500"
+          >
+            {departments.map((d) => <option key={d}>{d}</option>)}
           </select>
-          <select className="text-xs border border-slate-200 rounded-[10px] px-2.5 py-1.5 text-slate-500">
-            <option>All Wards</option>
+          <select
+            value={wardFilter}
+            onChange={(e) => setWardFilter(e.target.value)}
+            className="text-xs border border-slate-200 rounded-[10px] px-2.5 py-1.5 text-slate-500"
+          >
+            {wards.map((w) => <option key={w}>{w}</option>)}
           </select>
         </div>
 
@@ -1115,7 +1152,7 @@ function GrievanceTriage({ session, onOpenAuth }) {
           </div>
 
           {/* Rows — clicking one loads it into the detail panel on the right */}
-          {grievances.map((g) => {
+          {filteredGrievances.map((g) => {
             const [tone, label] = SLA_DISPLAY[g.sla] ?? SLA_DISPLAY.safe;
 
             return (
@@ -1139,10 +1176,17 @@ function GrievanceTriage({ session, onOpenAuth }) {
               </button>
             );
           })}
+          {filteredGrievances.length === 0 && (
+            <div className="px-[18px] py-8 text-sm text-slate-400 text-center">
+              No grievances match this filter.
+            </div>
+          )}
         </div>
 
         <div className="text-xs text-slate-400 mt-3">
-          {live ? `Showing ${grievances.length} live grievances` : "Showing 1–4 of 124 grievances"}
+          {live
+            ? `Showing ${filteredGrievances.length} of ${grievances.length} live grievances`
+            : `Showing ${filteredGrievances.length} of ${grievances.length} demo grievances`}
         </div>
       </div>
 
@@ -1339,9 +1383,24 @@ function HotspotForecast() {
 
 /* ────────────────────── SECTION 9: ADVISORY COMPOSER ─────────────────────── */
 
+const ADVISORY_APPROVAL_STEPS = [
+  { label: "Drafted by",     who: "Officer K. Deshmukh" },
+  { label: "Verified by",    who: "Chief Engineer" },
+  { label: "Final Approval", who: "Commissioner" },
+];
+
 function Advisory() {
   const [lang, setLang] = useState("English");
   const [severity, setSeverity] = useState("Critical");
+  const [wards, setWards] = useState(["Ambazari", "Sitabuldi", "Gandhibagh"]);
+  const [approvedSteps, setApprovedSteps] = useState(1); // "Drafted by" starts done
+
+  const addWard = () => {
+    const w = window.prompt("Add a ward to target:");
+    if (w && w.trim() && !wards.includes(w.trim())) setWards((cur) => [...cur, w.trim()]);
+  };
+  const removeWard = (w) => setWards((cur) => cur.filter((x) => x !== w));
+  const requestVerification = () => setApprovedSteps((n) => Math.min(n + 1, ADVISORY_APPROVAL_STEPS.length));
 
   return (
     <div className="grid grid-cols-3 gap-7">
@@ -1388,12 +1447,16 @@ function Advisory() {
 
         <div className="text-[11px] font-bold text-slate-400 mb-2">AFFECTED WARDS (TARGETING)</div>
         <div className="flex gap-2 mb-5 flex-wrap items-center">
-          {["Ambazari", "Sitabuldi", "Gandhibagh"].map((w) => (
-            <span key={w} className="bg-[#eef0fd] text-[#3730a3] text-xs font-semibold px-3 py-1.5 rounded-full">
+          {wards.map((w) => (
+            <button
+              key={w}
+              onClick={() => removeWard(w)}
+              className="bg-[#eef0fd] text-[#3730a3] text-xs font-semibold px-3 py-1.5 rounded-full hover:bg-[#e0e3fb]"
+            >
               {w} ✕
-            </span>
+            </button>
           ))}
-          <button className="text-xs text-slate-400 hover:text-slate-600">⊕ Add Ward</button>
+          <button onClick={addWard} className="text-xs text-slate-400 hover:text-slate-600">⊕ Add Ward</button>
         </div>
 
         <div className="text-[11px] font-bold text-slate-400 mb-2">DISTRIBUTION CHANNELS</div>
@@ -1451,27 +1514,32 @@ function Advisory() {
         {/* Human approval chain — nothing goes out automatically */}
         <div className="text-[11px] font-bold text-slate-400 mb-3">DISPATCH AUTHORIZATION</div>
         <div className="space-y-3 mb-6">
-          {[
-            { label: "Drafted by",     who: "Officer K. Deshmukh",       done: true  },
-            { label: "Verified by",    who: "Chief Engineer (Pending)",  done: false },
-            { label: "Final Approval", who: "Commissioner (Pending)",    done: false },
-          ].map((step, i) => (
-            <div key={i} className="flex items-center gap-2.5">
-              <div className={`w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] ${
-                step.done ? "bg-indigo-950" : "border border-slate-300"
-              }`}>
-                {step.done && "✓"}
+          {ADVISORY_APPROVAL_STEPS.map((step, i) => {
+            const done = i < approvedSteps;
+            return (
+              <div key={i} className="flex items-center gap-2.5">
+                <div className={`w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] ${
+                  done ? "bg-indigo-950" : "border border-slate-300"
+                }`}>
+                  {done && "✓"}
+                </div>
+                <div>
+                  <div className="text-[11px] text-slate-400">{step.label}</div>
+                  <div className="text-[13px] font-semibold text-slate-700">
+                    {step.who}{!done && " (Pending)"}
+                  </div>
+                </div>
               </div>
-              <div>
-                <div className="text-[11px] text-slate-400">{step.label}</div>
-                <div className="text-[13px] font-semibold text-slate-700">{step.who}</div>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
-        <button className="w-full bg-indigo-950 text-white rounded-xl py-3 text-[13px] font-bold hover:bg-indigo-900">
-          ➤ &nbsp;REQUEST VERIFICATION
+        <button
+          onClick={requestVerification}
+          disabled={approvedSteps >= ADVISORY_APPROVAL_STEPS.length}
+          className="w-full bg-indigo-950 text-white rounded-xl py-3 text-[13px] font-bold hover:bg-indigo-900 disabled:opacity-50"
+        >
+          {approvedSteps >= ADVISORY_APPROVAL_STEPS.length ? "✓ FULLY APPROVED" : <>➤ &nbsp;REQUEST VERIFICATION</>}
         </button>
       </div>
     </div>
@@ -1484,6 +1552,7 @@ function Advisory() {
 function FieldTeams() {
   const [active, setActive] = useState(TEAMS[0]);
   const counts = useCountUp([42, 18, 124, 24]);
+  const [dispatched, setDispatched] = useState(false);
 
   return (
     <div>
@@ -1575,22 +1644,34 @@ function FieldTeams() {
 
           {/* The proactive payoff: a task created by a prediction,
               not by a citizen complaint. */}
-          <div className="border border-red-100 bg-red-50/60 rounded-2xl p-3.5">
-            <div className="flex items-center gap-1.5 text-red-600 font-bold text-sm mb-2">
-              ⚠ Critical Unassigned Task
-            </div>
-            <div className="font-bold text-sm text-slate-900">Predicted Waterlogging</div>
-            <div className="text-xs text-slate-400 mb-3">📍 Ambazari Sector 9</div>
+          {!dispatched ? (
+            <div className="border border-red-100 bg-red-50/60 rounded-2xl p-3.5">
+              <div className="flex items-center gap-1.5 text-red-600 font-bold text-sm mb-2">
+                ⚠ Critical Unassigned Task
+              </div>
+              <div className="font-bold text-sm text-slate-900">Predicted Waterlogging</div>
+              <div className="text-xs text-slate-400 mb-3">📍 Ambazari Sector 9</div>
 
-            <div className="bg-white rounded-xl p-2.5 border border-red-100">
-              <div className="text-[10px] font-bold text-slate-400">SYSTEM SUGGESTION</div>
-              <div className="text-sm font-bold text-indigo-600">Assign: Drain-Unit 2</div>
-              <div className="text-xs text-slate-400 mb-2">🚚 4km away (Est. ETA 12m)</div>
-              <button className="w-full bg-indigo-950 text-white rounded-lg py-2 text-xs font-bold hover:bg-indigo-900">
-                ➤ DISPATCH NOW
-              </button>
+              <div className="bg-white rounded-xl p-2.5 border border-red-100">
+                <div className="text-[10px] font-bold text-slate-400">SYSTEM SUGGESTION</div>
+                <div className="text-sm font-bold text-indigo-600">Assign: Drain-Unit 2</div>
+                <div className="text-xs text-slate-400 mb-2">🚚 4km away (Est. ETA 12m)</div>
+                <button
+                  onClick={() => setDispatched(true)}
+                  className="w-full bg-indigo-950 text-white rounded-lg py-2 text-xs font-bold hover:bg-indigo-900"
+                >
+                  ➤ DISPATCH NOW
+                </button>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="border border-emerald-100 bg-emerald-50/60 rounded-2xl p-3.5">
+              <div className="flex items-center gap-1.5 text-emerald-700 font-bold text-sm">
+                ✓ Drain-Unit 2 Dispatched
+              </div>
+              <div className="text-xs text-slate-500 mt-1">Heading to Ambazari Sector 9 · ETA 12m</div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1601,6 +1682,19 @@ function FieldTeams() {
 /* ──────────────────────── SECTION 11: TRUST SCREEN ───────────────────────── */
 
 function Trust() {
+  const [showRecord, setShowRecord] = useState(false);
+  const [records, setRecords] = useState(null);
+
+  const openRecord = async () => {
+    setShowRecord(true);
+    if (!supabase) return;
+    const { data } = await supabase
+      .from("grievances")
+      .select("id, status, dept, created_at")
+      .order("created_at", { ascending: false });
+    setRecords(data || []);
+  };
+
   return (
     <div className="grid grid-cols-3 gap-7">
 
@@ -1655,11 +1749,50 @@ function Trust() {
             Every time someone looks at data or the computer suggests something, we write it
             down. Independent reviewers can check this record any time.
           </p>
-          <button className="text-xs font-bold text-indigo-600 hover:underline">
+          <button onClick={openRecord} className="text-xs font-bold text-indigo-600 hover:underline">
             See the Full Record →
           </button>
         </div>
       </div>
+
+      {showRecord && (
+        <div className="fixed inset-0 bg-[#0a0a10]/60 flex items-center justify-center z-[1100] p-6" onClick={() => setShowRecord(false)}>
+          <div
+            className="bg-white rounded-3xl max-w-lg w-full max-h-[80vh] overflow-y-auto p-6"
+            onClick={(e) => e.stopPropagation()}
+            style={{ boxShadow: "0 40px 80px -20px rgba(0,0,0,.35)" }}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div className="font-extrabold text-lg" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
+                Full Record
+              </div>
+              <button onClick={() => setShowRecord(false)} className="text-2xl leading-none text-slate-400 hover:text-slate-600">×</button>
+            </div>
+            {!supabase ? (
+              <p className="text-sm text-slate-500">
+                Connect a backend to see the real record — right now this demo only has seeded sample data.
+              </p>
+            ) : records === null ? (
+              <p className="text-sm text-slate-400">Loading…</p>
+            ) : records.length === 0 ? (
+              <p className="text-sm text-slate-400">No grievances submitted yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {records.map((r) => (
+                  <div key={r.id} className="flex items-center justify-between border border-slate-100 rounded-xl px-3 py-2 text-sm">
+                    <span className="font-mono text-xs text-indigo-600">#GR-{String(r.id).padStart(4, "0")}</span>
+                    <span className="text-xs text-slate-500">{r.dept}</span>
+                    <Badge tone="slate">{(r.status || "new").toUpperCase()}</Badge>
+                    <span className="text-[11px] text-slate-400">
+                      {new Date(r.created_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1699,7 +1832,7 @@ function AuthModal({ onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-[#0a0a10]/60 flex items-center justify-center z-[60] p-6" onClick={onClose}>
+    <div className="fixed inset-0 bg-[#0a0a10]/60 flex items-center justify-center z-[1100] p-6" onClick={onClose}>
       <div className="bg-white rounded-3xl max-w-sm w-full p-6" onClick={(e) => e.stopPropagation()} style={{ boxShadow: "0 40px 80px -20px rgba(0,0,0,.35)" }}>
         <div className="flex items-center justify-between mb-4">
           <div className="font-extrabold text-lg" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
