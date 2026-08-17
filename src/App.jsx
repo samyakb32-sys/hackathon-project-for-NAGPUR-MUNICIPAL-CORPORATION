@@ -2001,11 +2001,13 @@ export default function NagpurCommand() {
       className="flex h-screen text-[#0b0b12]"
       style={{
         fontFamily: "'Inter', sans-serif",
-        backgroundColor: "#f6f6f8",
+        backgroundColor: "#eef0fb",
         backgroundImage:
-          "radial-gradient(60vw 60vh at 8% -5%, rgba(99,102,241,0.10), transparent 60%)," +
-          "radial-gradient(50vw 50vh at 100% 10%, rgba(139,92,246,0.08), transparent 55%)," +
-          "radial-gradient(45vw 45vh at 20% 110%, rgba(67,56,202,0.06), transparent 55%)",
+          "radial-gradient(65vw 65vh at 0% -10%, rgba(79,70,229,0.80), transparent 55%)," +
+          "radial-gradient(55vw 60vh at 105% 0%, rgba(147,51,234,0.80), transparent 55%)," +
+          "radial-gradient(60vw 60vh at 15% 115%, rgba(30,27,75,0.80), transparent 60%)," +
+          "radial-gradient(40vw 40vh at 90% 100%, rgba(99,102,241,0.80), transparent 55%)," +
+          "linear-gradient(180deg, #eef0fb 0%, #f6f6fb 100%)",
         backgroundAttachment: "fixed",
       }}
     >
