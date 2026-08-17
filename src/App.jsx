@@ -2053,7 +2053,7 @@ function OfficerConsole({ session, onOpenAuth }) {
         </div>
       ) : (
         <>
-          <div className="bg-white rounded-[18px] p-5 mb-6 flex items-center justify-between gap-6 flex-wrap" style={{ boxShadow: CARD_SHADOW }}>
+          <div className="bg-white rounded-[18px] p-5 mb-6 flex items-start justify-between gap-6 flex-wrap" style={{ boxShadow: CARD_SHADOW }}>
             <div>
               <div className="text-sm font-bold text-slate-900 mb-0.5">AI Auto-Triage</div>
               <div className="text-xs text-slate-400 max-w-md">
@@ -2061,7 +2061,7 @@ function OfficerConsole({ session, onOpenAuth }) {
                 automatically. Everything below that always waits for you.
               </div>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-4 pt-0.5">
               <label className="flex items-center gap-2 text-xs text-slate-500">
                 Threshold
                 <input
