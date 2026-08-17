@@ -171,7 +171,7 @@ const PM10 = [
 const TEAMS = [
   {
     name: "RRT-Alpha",
-    status: "ON SITE",
+    status: "in_progress",
     task: "Desilting",
     loc: "Ambazari",
     eta: "45m",
@@ -183,7 +183,7 @@ const TEAMS = [
   },
   {
     name: "Drain-Unit 4",
-    status: "EN ROUTE",
+    status: "in_progress",
     task: "Drainage Repair",
     loc: "Sitabuldi",
     eta: "12m",
@@ -191,6 +191,22 @@ const TEAMS = [
       { t: "10:05", label: "Dispatched from Depot 2" },
       { t: "10:18", label: "En route to Sitabuldi", done: true },
     ],
+  },
+  {
+    name: "Drain-Unit 2",
+    status: "available",
+    task: null,
+    loc: "HQ Depot",
+    eta: null,
+    history: [],
+  },
+  {
+    name: "RRT-Bravo",
+    status: "unavailable",
+    task: null,
+    loc: "Off duty",
+    eta: null,
+    history: [],
   },
 ];
 
@@ -1663,10 +1679,119 @@ function Advisory() {
 
 /* ───────────────────── SECTION 10: FIELD TEAMS SCREEN ────────────────────── */
 
-function FieldTeams() {
+const TEAM_STATUS_DISPLAY = {
+  available:   ["green", "AVAILABLE"],
+  in_progress: ["blue",  "IN PROGRESS"],
+  unavailable: ["slate", "UNAVAILABLE"],
+};
+
+function AddTeamModal({ onClose, onAdd }) {
+  const [name, setName] = useState("");
+  const [task, setTask] = useState("");
+  const [loc, setLoc] = useState("");
+  const [eta, setEta] = useState("");
+  const [status, setStatus] = useState("available");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setBusy(true);
+    setError("");
+    const err = await onAdd({
+      name: name.trim(),
+      task: task.trim() || null,
+      loc: loc.trim() || null,
+      eta: eta.trim() || null,
+      status,
+    });
+    setBusy(false);
+    if (err) setError(err);
+    else onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-[#0a0a10]/60 flex items-center justify-center z-[1100] p-6" onClick={onClose}>
+      <div
+        className="bg-white rounded-3xl max-w-sm w-full p-6"
+        onClick={(e) => e.stopPropagation()}
+        style={{ boxShadow: "0 40px 80px -20px rgba(0,0,0,.35)" }}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <div className="font-extrabold text-lg" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
+            Add a Team
+          </div>
+          <button onClick={onClose} className="text-2xl leading-none text-slate-400 hover:text-slate-600">×</button>
+        </div>
+        <form onSubmit={submit} className="space-y-3">
+          <input
+            value={name} onChange={(e) => setName(e.target.value)} placeholder="Team name, e.g. RRT-Bravo" required
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+          />
+          <select
+            value={status} onChange={(e) => setStatus(e.target.value)}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+          >
+            <option value="available">Available</option>
+            <option value="in_progress">In Progress</option>
+            <option value="unavailable">Unavailable</option>
+          </select>
+          <input
+            value={task} onChange={(e) => setTask(e.target.value)} placeholder="Current task (optional)"
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+          />
+          <input
+            value={loc} onChange={(e) => setLoc(e.target.value)} placeholder="Location / ward (optional)"
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+          />
+          <input
+            value={eta} onChange={(e) => setEta(e.target.value)} placeholder="ETA, e.g. 12m (optional)"
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+          />
+          {error && <div className="text-xs text-red-600">{error}</div>}
+          <button type="submit" disabled={busy} className="w-full bg-indigo-950 text-white rounded-lg py-2.5 text-sm font-bold disabled:opacity-50">
+            {busy ? "Adding…" : "Add Team"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function FieldTeams({ session, onOpenAuth }) {
+  const [teams, setTeams] = useState(TEAMS);
+  const [live, setLive] = useState(false);
   const [active, setActive] = useState(TEAMS[0]);
-  const counts = useCountUp([42, 18, 124, 24]);
   const [dispatched, setDispatched] = useState(false);
+  const [showAddTeam, setShowAddTeam] = useState(false);
+
+  const loadTeams = async () => {
+    if (!supabase) return;
+    const { data, error } = await supabase.from("teams").select("*").order("created_at", { ascending: false });
+    if (!error && data && data.length) {
+      const mapped = data.map((t) => ({ ...t, history: t.history || [] }));
+      setTeams(mapped);
+      setLive(true);
+      setActive((cur) => (mapped.some((t) => t.id === cur?.id) ? cur : mapped[0]));
+    }
+  };
+
+  useEffect(() => { loadTeams(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  const addTeam = async (team) => {
+    if (!supabase) return "Backend not configured.";
+    if (!session) return "Sign in as an officer to add a team.";
+    const { error } = await supabase.from("teams").insert(team);
+    if (error) return error.message;
+    await loadTeams();
+    return null;
+  };
+
+  const total = teams.length;
+  const available = teams.filter((t) => t.status === "available").length;
+  const inProgress = teams.filter((t) => t.status === "in_progress" || t.status === "ON SITE" || t.status === "EN ROUTE").length;
+  const unavailable = teams.filter((t) => t.status === "unavailable").length;
 
   return (
     <div>
@@ -1674,12 +1799,21 @@ function FieldTeams() {
         eyebrow="LIVE DEPLOYMENT"
         title="Field Teams"
         subtitle="Where crews are right now, and what's still waiting to be assigned."
+        badge={live ? <Badge tone="green">● LIVE</Badge> : <Badge tone="slate">demo data</Badge>}
+        action={
+          <button
+            onClick={() => (session ? setShowAddTeam(true) : onOpenAuth())}
+            className="text-xs font-bold bg-indigo-950 text-white px-3.5 py-2 rounded-[10px] hover:bg-indigo-900"
+          >
+            + Add Team
+          </button>
+        }
       />
       <div className="grid grid-cols-4 gap-5 mb-6">
-        <StatCard label="Teams Deployed" value={counts[0]} sub="+2 from shift start" tone="neutral" />
-        <StatCard label="Tasks In Progress" value={counts[1]} sub="-4 pending" tone="down" />
-        <StatCard label="Tasks Completed Today" value={counts[2]} sub="+12% vs avg" tone="down" />
-        <StatCard label="Avg Response Time" value={counts[3]} suffix="m" sub="+2m target" tone="up" />
+        <StatCard label="Total Teams" value={total} tone="neutral" />
+        <StatCard label="Available" value={available} tone="down" />
+        <StatCard label="In Progress" value={inProgress} tone="neutral" />
+        <StatCard label="Unavailable" value={unavailable} tone="up" />
       </div>
 
       <div className="grid grid-cols-3 gap-6">
@@ -1697,11 +1831,14 @@ function FieldTeams() {
           {/* Timeline for whichever crew is selected on the right */}
           <div className="bg-white rounded-[20px] p-5" style={{ boxShadow: CARD_SHADOW }}>
             <div className="font-bold text-slate-900 mb-3.5" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
-              🕘 {active.name} Operational History
+              🕘 {active?.name} Operational History
             </div>
             <div className="flex gap-6">
               <div className="flex-1 space-y-2.5">
-                {active.history.map((h, i) => (
+                {(active?.history || []).length === 0 && (
+                  <div className="text-sm text-slate-400">No history recorded for this team yet.</div>
+                )}
+                {(active?.history || []).map((h, i) => (
                   <div key={i} className="flex gap-3">
                     <div className={`w-2.5 h-2.5 rounded-full mt-1.5 flex-shrink-0 ${
                       h.done ? "bg-indigo-950" : "border-2 border-slate-300"
@@ -1736,30 +1873,38 @@ function FieldTeams() {
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <div className="font-bold text-slate-900" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
-              Active Deployments
+              Team Roster
             </div>
-            <Badge tone="blue">18 Active</Badge>
+            <Badge tone="blue">{total} Total</Badge>
           </div>
 
-          {TEAMS.map((t) => (
-            <button
-              key={t.name}
-              onClick={() => setActive(t)}
-              className={`w-full text-left border rounded-2xl p-3.5 transition-colors ${
-                active.name === t.name
-                  ? "border-indigo-200 bg-indigo-50/70"
-                  : "border-slate-200 bg-white hover:bg-slate-50"
-              }`}
-            >
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-bold text-sm text-slate-900">{t.name}</span>
-                <Badge tone={t.status === "ON SITE" ? "blue" : "amber"}>{t.status}</Badge>
-              </div>
-              <div className="text-xs text-slate-400">Task: {t.task}</div>
-              <div className="text-xs text-slate-400">Loc: {t.loc}</div>
-              <div className="text-[11px] text-slate-400 mt-1">⏱ Time: {t.eta}</div>
-            </button>
-          ))}
+          {teams.map((t) => {
+            const [tone, label] = TEAM_STATUS_DISPLAY[t.status] ?? [t.status === "ON SITE" ? "blue" : "amber", t.status];
+            return (
+              <button
+                key={t.id ?? t.name}
+                onClick={() => setActive(t)}
+                className={`w-full text-left border rounded-2xl p-3.5 transition-colors ${
+                  active?.name === t.name
+                    ? "border-indigo-200 bg-indigo-50/70"
+                    : "border-slate-200 bg-white hover:bg-slate-50"
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-bold text-sm text-slate-900">{t.name}</span>
+                  <Badge tone={tone}>{label}</Badge>
+                </div>
+                {t.task && <div className="text-xs text-slate-400">Task: {t.task}</div>}
+                {t.loc && <div className="text-xs text-slate-400">Loc: {t.loc}</div>}
+                {t.eta && <div className="text-[11px] text-slate-400 mt-1">⏱ Time: {t.eta}</div>}
+              </button>
+            );
+          })}
+          {teams.length === 0 && (
+            <div className="text-sm text-slate-400 text-center py-6 border border-dashed border-slate-200 rounded-2xl">
+              No teams yet. Add one to get started.
+            </div>
+          )}
 
           {/* The proactive payoff: a task created by a prediction,
               not by a citizen complaint. */}
@@ -1793,6 +1938,8 @@ function FieldTeams() {
           )}
         </div>
       </div>
+
+      {showAddTeam && <AddTeamModal onClose={() => setShowAddTeam(false)} onAdd={addTeam} />}
     </div>
   );
 }
@@ -2293,7 +2440,7 @@ export default function NagpurCommand() {
             {view === "grievances" && <GrievanceTriage session={session} onOpenAuth={() => setAuthOpen(true)} />}
             {view === "hotspots"   && <HotspotForecast />}
             {view === "advisory"   && <Advisory />}
-            {view === "field"      && <FieldTeams />}
+            {view === "field"      && <FieldTeams session={session} onOpenAuth={() => setAuthOpen(true)} />}
             {view === "officer"    && <OfficerConsole session={session} onOpenAuth={() => setAuthOpen(true)} />}
             {view === "trust"      && <Trust />}
           </div>
