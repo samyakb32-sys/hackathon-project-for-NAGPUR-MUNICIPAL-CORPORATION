@@ -93,3 +93,78 @@ values
   ('Drain-Unit 4', 'Drainage Repair', 'Sitabuldi', '12m', 'in_progress'),
   ('Drain-Unit 2', null, 'HQ Depot', null, 'available')
 on conflict do nothing;
+
+
+-- Nagpur Command — officer roles + DOB-based password reset
+--
+-- Officer accounts are NOT self-service: signing up (citizen or via the
+-- "Login as Officer" door) always creates a 'citizen' profile. To make
+-- someone an officer, run this after they've signed up once:
+--   update public.profiles set role = 'officer' where email = 'their@email.com';
+
+create table if not exists public.profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  email text,
+  dob date,
+  role text not null default 'citizen' check (role in ('citizen', 'officer')),
+  blocked boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+alter table public.profiles enable row level security;
+
+-- Helper used by RLS policies (here and in future tables) to check "is the
+-- current user an officer?" without repeating the subquery everywhere.
+-- security definer + search_path pinned so it runs as the function owner
+-- (bypasses RLS on the lookup itself, same pattern Supabase's own docs use
+-- for role-check helpers — otherwise this would recurse into its own RLS).
+create or replace function public.is_officer()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.profiles where id = auth.uid() and role = 'officer'
+  );
+$$;
+
+-- Anyone can read profiles — the app needs this to tell "is this user an
+-- officer" and to show the citizen roster for blocking. No secrets live
+-- here; DOB is only ever compared server-side, inside the reset-password
+-- Edge Function, using the service role key — never over this policy.
+drop policy if exists "public can read profiles" on public.profiles;
+create policy "public can read profiles"
+  on public.profiles for select
+  to anon, authenticated
+  using (true);
+
+-- Only officers can update profiles (e.g. blocking a citizen, or promoting
+-- another officer later from the Officer Console instead of raw SQL).
+drop policy if exists "officers can update profiles" on public.profiles;
+create policy "officers can update profiles"
+  on public.profiles for update
+  to authenticated
+  using (public.is_officer())
+  with check (true);
+
+-- New sign-ups get a profile row automatically. Email + DOB come from
+-- auth.users' metadata, which AuthModal sets via signUp's `options.data`.
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.profiles (id, email, dob)
+  values (new.id, lower(new.email), (new.raw_user_meta_data->>'dob')::date);
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
