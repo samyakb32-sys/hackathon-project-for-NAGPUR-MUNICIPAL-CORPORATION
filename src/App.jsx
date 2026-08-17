@@ -1072,7 +1072,7 @@ const STATUS_DOT = {
   reassigned: "bg-red-500",
 };
 
-function GrievanceTriage({ session, onOpenAuth }) {
+function GrievanceTriage({ session, isOfficer, isBlocked, onOpenAuth }) {
   const [grievances, setGrievances] = useState(GRIEVANCES);
   const [live, setLive] = useState(false);
   const [selectedId, setSelectedId] = useState(GRIEVANCES[0].id);
@@ -1120,7 +1120,7 @@ function GrievanceTriage({ session, onOpenAuth }) {
 
   const submitGrievance = async (e) => {
     e.preventDefault();
-    if (!supabase || !form.text.trim()) return;
+    if (!supabase || !form.text.trim() || isBlocked) return;
     setSubmitting(true);
 
     // Ask the AI classifier for a department guess + confidence + a
@@ -1136,6 +1136,7 @@ function GrievanceTriage({ session, onOpenAuth }) {
       lang: form.lang,
       dept: ai?.department || "PENDING REVIEW",
       conf: ai?.confidence ?? null,
+      user_id: session?.user?.id ?? null,
     });
     setSubmitting(false);
     if (!error) {
@@ -1171,6 +1172,22 @@ function GrievanceTriage({ session, onOpenAuth }) {
     setActionBusy(false);
   };
 
+  const deleteGrievance = async () => {
+    if (!supabase || !session || !isOfficer || !selected?.rawId) return;
+    if (!window.confirm(`Delete ${selected.id} permanently? This can't be undone.`)) return;
+    setActionBusy(true);
+    setActionError("");
+    const { error } = await supabase.from("grievances").delete().eq("id", selected.rawId);
+    if (error) {
+      setActionError(error.message);
+    } else {
+      const remaining = filteredGrievances.filter((g) => g.id !== selectedId);
+      if (remaining.length) setSelectedId(remaining[0].id);
+      await loadGrievances();
+    }
+    setActionBusy(false);
+  };
+
   return (
     <div className="grid grid-cols-3 gap-7">
 
@@ -1193,15 +1210,21 @@ function GrievanceTriage({ session, onOpenAuth }) {
             </p>
           </div>
           {supabase && (
-            <button
-              onClick={() => {
-                if (!session) { onOpenAuth?.(); return; }
-                setShowForm((v) => !v);
-              }}
-              className="text-xs font-bold bg-indigo-950 text-white px-3.5 py-2 rounded-[10px] hover:bg-indigo-900 whitespace-nowrap"
-            >
-              + New Grievance
-            </button>
+            session && isBlocked ? (
+              <div className="text-xs font-bold text-red-600 border border-red-200 bg-red-50 px-3.5 py-2 rounded-[10px] whitespace-nowrap">
+                Your account is blocked from submitting grievances
+              </div>
+            ) : (
+              <button
+                onClick={() => {
+                  if (!session) { onOpenAuth?.(); return; }
+                  setShowForm((v) => !v);
+                }}
+                className="text-xs font-bold bg-indigo-950 text-white px-3.5 py-2 rounded-[10px] hover:bg-indigo-900 whitespace-nowrap"
+              >
+                + New Grievance
+              </button>
+            )
           )}
         </div>
 
@@ -1430,6 +1453,16 @@ function GrievanceTriage({ session, onOpenAuth }) {
             ↗ ESCALATE
           </button>
         </div>
+
+        {isOfficer && (
+          <button
+            onClick={deleteGrievance}
+            disabled={actionBusy}
+            className="w-full text-red-500 text-[11px] font-bold py-2 mt-2 hover:text-red-700 disabled:opacity-40"
+          >
+            🗑 Delete Grievance
+          </button>
+        )}
       </div>
     </div>
   );
@@ -1998,6 +2031,8 @@ function OfficerConsole({ session, isOfficer, onOpenAuth }) {
   const [autoLog, setAutoLog] = useState([]); // ids auto-approved this session
   const [busyId, setBusyId] = useState(null);
   const [actionError, setActionError] = useState("");
+  const [citizens, setCitizens] = useState([]);
+  const [citizenBusyId, setCitizenBusyId] = useState(null);
 
   const loadGrievances = async () => {
     if (!supabase) return;
@@ -2016,7 +2051,27 @@ function OfficerConsole({ session, isOfficer, onOpenAuth }) {
     }
   };
 
-  useEffect(() => { loadGrievances(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  const loadCitizens = async () => {
+    if (!supabase) return;
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, email, blocked, created_at")
+      .eq("role", "citizen")
+      .order("created_at", { ascending: false });
+    if (!error && data) setCitizens(data);
+  };
+
+  const toggleBlocked = async (citizen) => {
+    if (!supabase || !session) return;
+    setCitizenBusyId(citizen.id);
+    const { error } = await supabase.from("profiles").update({ blocked: !citizen.blocked }).eq("id", citizen.id);
+    if (!error) {
+      setCitizens((cur) => cur.map((c) => (c.id === citizen.id ? { ...c, blocked: !c.blocked } : c)));
+    }
+    setCitizenBusyId(null);
+  };
+
+  useEffect(() => { loadGrievances(); loadCitizens(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
   useEffect(() => { localStorage.setItem("nc-ai-auto-mode", autoMode ? "1" : "0"); }, [autoMode]);
 
   // Auto-approves anything above the confidence threshold whenever the
@@ -2208,6 +2263,36 @@ function OfficerConsole({ session, isOfficer, onOpenAuth }) {
                   </div>
                 )}
               </div>
+            </div>
+          </div>
+
+          <div className="mt-8">
+            <div className="text-[11px] font-bold text-slate-400 mb-2">
+              CITIZEN ACCOUNTS ({citizens.length})
+            </div>
+            <div className="bg-white rounded-[18px] overflow-hidden" style={{ boxShadow: CARD_SHADOW }}>
+              {citizens.map((c) => (
+                <div key={c.id} className="flex items-center justify-between px-4 py-3 border-b border-slate-50 last:border-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-slate-800">{c.email}</span>
+                    {c.blocked && <Badge tone="red">BLOCKED</Badge>}
+                  </div>
+                  <button
+                    onClick={() => toggleBlocked(c)}
+                    disabled={citizenBusyId === c.id}
+                    className={`text-[11px] font-bold px-3 py-1.5 rounded-lg disabled:opacity-40 ${
+                      c.blocked
+                        ? "border border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                        : "border border-red-200 text-red-600 hover:bg-red-50"
+                    }`}
+                  >
+                    {c.blocked ? "Unblock" : "Block"}
+                  </button>
+                </div>
+              ))}
+              {citizens.length === 0 && (
+                <div className="text-sm text-slate-400 text-center py-8">No citizen accounts yet.</div>
+              )}
             </div>
           </div>
         </>
@@ -2517,6 +2602,7 @@ export default function NagpurCommand() {
   const [openAlert, setOpenAlert] = useState(null);   // null = modal closed
   const [session, setSession] = useState(null);       // auth session, null = signed out
   const [isOfficer, setIsOfficer] = useState(false);  // does the signed-in session have the officer role
+  const [isBlocked, setIsBlocked] = useState(false);  // has an officer blocked this citizen account
   const [authOpen, setAuthOpen] = useState(null);     // null closed, "citizen" or "officer" picks the modal variant
 
   useEffect(() => {
@@ -2527,10 +2613,14 @@ export default function NagpurCommand() {
   }, []);
 
   useEffect(() => {
-    if (!supabase || !session) { setIsOfficer(false); return; }
+    if (!supabase || !session) { setIsOfficer(false); setIsBlocked(false); return; }
     let cancelled = false;
-    supabase.from("profiles").select("role").eq("id", session.user.id).maybeSingle()
-      .then(({ data }) => { if (!cancelled) setIsOfficer(data?.role === "officer"); });
+    supabase.from("profiles").select("role, blocked").eq("id", session.user.id).maybeSingle()
+      .then(({ data }) => {
+        if (cancelled) return;
+        setIsOfficer(data?.role === "officer");
+        setIsBlocked(!!data?.blocked);
+      });
     return () => { cancelled = true; };
   }, [session]);
 
@@ -2595,7 +2685,7 @@ export default function NagpurCommand() {
         <div className="flex-1 overflow-y-auto">
           <div key={view} className="page-anim px-11 pt-10 pb-14">
             {view === "command"    && <CommandView onOpenAlert={setOpenAlert} />}
-            {view === "grievances" && <GrievanceTriage session={session} onOpenAuth={() => setAuthOpen("citizen")} />}
+            {view === "grievances" && <GrievanceTriage session={session} isOfficer={isOfficer} isBlocked={isBlocked} onOpenAuth={() => setAuthOpen("citizen")} />}
             {view === "hotspots"   && <HotspotForecast />}
             {view === "advisory"   && <Advisory />}
             {view === "field"      && <FieldTeams session={session} onOpenAuth={() => setAuthOpen("citizen")} />}
