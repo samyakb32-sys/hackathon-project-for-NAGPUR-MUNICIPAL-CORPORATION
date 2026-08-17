@@ -23,17 +23,21 @@ import { supabase } from "./lib/supabase.js";
 
 /* ─────────────────────────────── SECTION 1: DATA ─────────────────────────── */
 
-// Sidebar navigation items
+// Sidebar navigation items shown to everyone.
 const NAV = [
   { id: "command",    label: "Command" },
   { id: "grievances", label: "Grievances" },
   { id: "hotspots",   label: "Hotspots & Forecast" },
   { id: "advisory",   label: "Advisory" },
   { id: "field",      label: "Field Teams" },
+  { id: "inbox",      label: "Inbox" },
   { id: "trust",      label: "Trust" },
-  // "officer" is intentionally not in this list — the Officer Console has
-  // its own door (TopBar "Login as Officer" / the profile dropdown once
-  // signed in as one), not a sidebar item everyone sees.
+  // "officer" and "ai-activity" are intentionally not in this list — they
+  // only appear once signed in as an officer (see NagpurCommand's navItems).
+];
+
+const OFFICER_NAV = [
+  { id: "ai-activity", label: "AI Activity" },
 ];
 
 const SCREEN_TITLES = {
@@ -42,7 +46,9 @@ const SCREEN_TITLES = {
   hotspots: "Hotspots & Forecast",
   advisory: "Advisory Composer",
   field: "Field Teams",
+  inbox: "Inbox",
   officer: "Officer Console",
+  "ai-activity": "AI Activity",
   trust: "Trust & Ethics",
 };
 
@@ -2038,12 +2044,9 @@ function FieldTeams({ session, onOpenAuth }) {
 
 /* ─────────────────── SECTION 10.5: OFFICER CONSOLE SCREEN ────────────────── */
 
-function OfficerConsole({ session, isOfficer, onOpenAuth }) {
+function OfficerConsole({ session, isOfficer, onOpenAuth, onOpenAIActivity }) {
   const [grievances, setGrievances] = useState(GRIEVANCES);
   const [live, setLive] = useState(false);
-  const [autoMode, setAutoMode] = useState(() => localStorage.getItem("nc-ai-auto-mode") === "1");
-  const [threshold, setThreshold] = useState(90);
-  const [autoLog, setAutoLog] = useState([]); // ids auto-approved this session
   const [busyId, setBusyId] = useState(null);
   const [actionError, setActionError] = useState("");
   const [citizens, setCitizens] = useState([]);
@@ -2095,7 +2098,6 @@ function OfficerConsole({ session, isOfficer, onOpenAuth }) {
     fetchSiteContent().then((data) => setContentForm({ ...SITE_CONTENT_DEFAULTS, ...data }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  useEffect(() => { localStorage.setItem("nc-ai-auto-mode", autoMode ? "1" : "0"); }, [autoMode]);
 
   const saveSiteContent = async () => {
     if (!supabase || !session) return;
@@ -2109,30 +2111,6 @@ function OfficerConsole({ session, isOfficer, onOpenAuth }) {
       setTimeout(() => setContentSaved(false), 2000);
     }
   };
-
-  // Auto-approves anything above the confidence threshold whenever the
-  // pending list, toggle, or threshold changes — no separate polling loop.
-  // Below the threshold always waits for the officer, no matter what.
-  useEffect(() => {
-    if (!autoMode || !live || !session || !supabase) return;
-    const qualifying = grievances.filter(
-      (g) => (g.status === "new" || !g.status) && g.conf != null && g.conf >= threshold
-    );
-    if (qualifying.length === 0) return;
-
-    let cancelled = false;
-    (async () => {
-      for (const g of qualifying) {
-        const { error } = await supabase.from("grievances").update({ status: "approved" }).eq("id", g.rawId);
-        if (!error && !cancelled) {
-          setAutoLog((cur) => [{ id: g.id, dept: g.dept, conf: g.conf, at: Date.now() }, ...cur].slice(0, 20));
-        }
-      }
-      if (!cancelled) await loadGrievances();
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoMode, threshold, live, session, grievances]);
 
   const decide = async (g, status) => {
     if (!supabase || !session) return;
@@ -2148,13 +2126,7 @@ function OfficerConsole({ session, isOfficer, onOpenAuth }) {
     setBusyId(null);
   };
 
-  const pending = grievances.filter((g) => g.status === "new" || !g.status);
-  // When auto-triage is off, nothing gets auto-approved, so every pending
-  // item needs a manual decision — only exclude the high-confidence ones
-  // once auto-triage is actually on and handling them.
-  const needsReview = pending.filter(
-    (g) => !autoMode || !(g.conf != null && g.conf >= threshold)
-  );
+  const needsReview = grievances.filter((g) => g.status === "new" || !g.status);
 
   if (!supabase) {
     return (
@@ -2193,113 +2165,67 @@ function OfficerConsole({ session, isOfficer, onOpenAuth }) {
         </div>
       ) : (
         <>
-          <div className="bg-white rounded-[18px] p-5 mb-6 flex items-start justify-between gap-6 flex-wrap" style={{ boxShadow: CARD_SHADOW }}>
-            <div>
-              <div className="text-sm font-bold text-slate-900 mb-0.5">AI Auto-Triage</div>
-              <div className="text-xs text-slate-400 max-w-md">
-                When on, grievances the AI is at least {threshold}% confident about are approved
-                automatically. Everything below that always waits for you.
+          <button
+            onClick={onOpenAIActivity}
+            className="w-full bg-white rounded-[18px] p-4 mb-6 flex items-center justify-between hover:bg-indigo-50/40 transition-colors text-left"
+            style={{ boxShadow: CARD_SHADOW }}
+          >
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">🤖</span>
+              <div>
+                <div className="text-sm font-bold text-slate-900">Watch the AI work</div>
+                <div className="text-xs text-slate-400">Auto-triage toggle, confidence threshold, and a live view of what it's doing right now.</div>
               </div>
             </div>
-            <div className="flex items-center gap-4 pt-0.5">
-              <label className="flex items-center gap-2 text-xs text-slate-500">
-                Threshold
-                <input
-                  type="range"
-                  min="70"
-                  max="99"
-                  value={threshold}
-                  onChange={(e) => setThreshold(Number(e.target.value))}
-                  className="w-28 accent-indigo-600"
-                />
-                <span className="font-bold text-indigo-600 w-9">{threshold}%</span>
-              </label>
-              <button
-                onClick={() => setAutoMode((v) => !v)}
-                aria-pressed={autoMode}
-                className={`w-14 h-8 rounded-full relative transition-colors ${autoMode ? "bg-emerald-500" : "bg-slate-200"}`}
-              >
-                <span
-                  className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-transform ${autoMode ? "translate-x-7" : "translate-x-1"}`}
-                />
-              </button>
-            </div>
-          </div>
+            <span className="text-indigo-600 text-sm font-bold">Open AI Activity →</span>
+          </button>
 
           {actionError && (
             <div className="text-xs text-red-600 mb-4">Couldn't save: {actionError}</div>
           )}
 
-          <div className="grid grid-cols-2 gap-6">
-            <div>
-              <div className="text-[11px] font-bold text-slate-400 mb-2">
-                NEEDS YOUR DECISION ({needsReview.length})
+          <div className="text-[11px] font-bold text-slate-400 mb-2">
+            NEEDS YOUR DECISION ({needsReview.length})
+          </div>
+          <div className="grid grid-cols-2 gap-3 mb-8">
+            {needsReview.map((g) => (
+              <div key={g.id} className="bg-white rounded-xl p-3.5" style={{ boxShadow: CARD_SHADOW }}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-mono text-xs text-indigo-600">{g.id}</span>
+                  <span className="text-xs text-slate-400">
+                    {g.conf != null ? `${g.conf}% conf.` : "no AI read"}
+                  </span>
+                </div>
+                <div className="text-sm text-slate-800 mb-0.5">{g.text}</div>
+                {g.en && <div className="text-xs text-slate-400 mb-2">{g.en}</div>}
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={() => decide(g, "approved")}
+                    disabled={busyId === g.id}
+                    className="flex-1 bg-indigo-950 text-white rounded-lg py-1.5 text-[11px] font-bold hover:bg-indigo-900 disabled:opacity-40"
+                  >
+                    Approve
+                  </button>
+                  <button
+                    onClick={() => decide(g, "reassigned")}
+                    disabled={busyId === g.id}
+                    className="flex-1 border border-slate-200 text-slate-500 rounded-lg py-1.5 text-[11px] font-bold hover:bg-slate-50 disabled:opacity-40"
+                  >
+                    Reassign
+                  </button>
+                  <button
+                    onClick={() => decide(g, "escalated")}
+                    disabled={busyId === g.id}
+                    className="flex-1 border border-red-200 text-red-600 rounded-lg py-1.5 text-[11px] font-bold hover:bg-red-50 disabled:opacity-40"
+                  >
+                    Escalate
+                  </button>
+                </div>
               </div>
-              <div className="space-y-2">
-                {needsReview.map((g) => (
-                  <div key={g.id} className="bg-white rounded-xl p-3.5" style={{ boxShadow: CARD_SHADOW }}>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-mono text-xs text-indigo-600">{g.id}</span>
-                      <span className="text-xs text-slate-400">
-                        {g.conf != null ? `${g.conf}% conf.` : "no AI read"}
-                      </span>
-                    </div>
-                    <div className="text-sm text-slate-800 mb-0.5">{g.text}</div>
-                    {g.en && <div className="text-xs text-slate-400 mb-2">{g.en}</div>}
-                    <div className="flex gap-1.5">
-                      <button
-                        onClick={() => decide(g, "approved")}
-                        disabled={busyId === g.id}
-                        className="flex-1 bg-indigo-950 text-white rounded-lg py-1.5 text-[11px] font-bold hover:bg-indigo-900 disabled:opacity-40"
-                      >
-                        Approve
-                      </button>
-                      <button
-                        onClick={() => decide(g, "reassigned")}
-                        disabled={busyId === g.id}
-                        className="flex-1 border border-slate-200 text-slate-500 rounded-lg py-1.5 text-[11px] font-bold hover:bg-slate-50 disabled:opacity-40"
-                      >
-                        Reassign
-                      </button>
-                      <button
-                        onClick={() => decide(g, "escalated")}
-                        disabled={busyId === g.id}
-                        className="flex-1 border border-red-200 text-red-600 rounded-lg py-1.5 text-[11px] font-bold hover:bg-red-50 disabled:opacity-40"
-                      >
-                        Escalate
-                      </button>
-                    </div>
-                  </div>
-                ))}
-                {needsReview.length === 0 && (
-                  <div className="text-sm text-slate-400 text-center py-8">Nothing waiting on you right now.</div>
-                )}
-              </div>
-            </div>
-
-            <div>
-              <div className="text-[11px] font-bold text-slate-400 mb-2">
-                AUTO-APPROVED BY AI ({autoLog.length}{!autoMode && " · auto-triage is off"})
-              </div>
-              <div className="space-y-2">
-                {autoLog.map((entry) => (
-                  <div key={entry.id + entry.at} className="bg-emerald-50/60 border border-emerald-100 rounded-xl p-3 flex items-center justify-between">
-                    <div>
-                      <span className="font-mono text-xs text-emerald-700">{entry.id}</span>
-                      <span className="text-xs text-slate-500 ml-2">{entry.dept}</span>
-                    </div>
-                    <span className="text-xs font-bold text-emerald-700">{entry.conf}%</span>
-                  </div>
-                ))}
-                {autoLog.length === 0 && (
-                  <div className="text-sm text-slate-400 text-center py-8">
-                    {autoMode
-                      ? "No high-confidence grievances to auto-approve yet."
-                      : "Turn on auto-triage to see what it would approve."}
-                  </div>
-                )}
-              </div>
-            </div>
+            ))}
+            {needsReview.length === 0 && (
+              <div className="col-span-2 text-sm text-slate-400 text-center py-8">Nothing waiting on you right now.</div>
+            )}
           </div>
 
           <div className="mt-8">
@@ -2374,6 +2300,339 @@ function OfficerConsole({ session, isOfficer, onOpenAuth }) {
             </div>
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+
+/* ─────────────────────── SECTION 10.6: AI ACTIVITY SCREEN ────────────────── */
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function AIActivity({ session, isOfficer, onOpenAuth }) {
+  const [grievances, setGrievances] = useState(GRIEVANCES);
+  const [live, setLive] = useState(false);
+  const [autoMode, setAutoMode] = useState(() => localStorage.getItem("nc-ai-auto-mode") === "1");
+  const [threshold, setThreshold] = useState(() => Number(localStorage.getItem("nc-ai-threshold")) || 90);
+  const [autoLog, setAutoLog] = useState([]);
+  const [cursorId, setCursorId] = useState(null);
+  const [cursorStatus, setCursorStatus] = useState("");
+
+  const loadGrievances = async () => {
+    if (!supabase) return;
+    const { data, error } = await supabase
+      .from("grievances")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (!error && data && data.length) {
+      const mapped = data.map((g) => ({
+        ...g,
+        id: `#GR-${String(g.id).padStart(4, "0")}`,
+        rawId: g.id,
+      }));
+      setGrievances(mapped);
+      setLive(true);
+    }
+  };
+
+  useEffect(() => { loadGrievances(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => { localStorage.setItem("nc-ai-auto-mode", autoMode ? "1" : "0"); }, [autoMode]);
+  useEffect(() => { localStorage.setItem("nc-ai-threshold", String(threshold)); }, [threshold]);
+
+  // The single home for the real auto-approval engine (moved out of
+  // Officer Console) — this is also what drives the "AI cursor" below, so
+  // what's animated on screen is exactly what's actually happening, not a
+  // separate simulation. Steps through qualifying pending grievances one
+  // at a time: highlight it, show what the AI read off it, then approve.
+  useEffect(() => {
+    if (!autoMode || !live || !session || !isOfficer || !supabase) {
+      setCursorId(null);
+      setCursorStatus("");
+      return;
+    }
+    const qualifying = grievances.filter(
+      (g) => (g.status === "new" || !g.status) && g.conf != null && g.conf >= threshold
+    );
+    if (qualifying.length === 0) {
+      setCursorId(null);
+      setCursorStatus("Nothing above the threshold right now. Watching for new grievances…");
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      for (const g of qualifying) {
+        if (cancelled) return;
+        setCursorId(g.id);
+        setCursorStatus(`Reading ${g.id}…`);
+        await sleep(650);
+        if (cancelled) return;
+        setCursorStatus(`${g.conf}% confident → ${g.dept}. Approving…`);
+        await sleep(650);
+        if (cancelled) return;
+        const { error } = await supabase.from("grievances").update({ status: "approved" }).eq("id", g.rawId);
+        if (!error) {
+          setCursorStatus(`✓ ${g.id} auto-approved`);
+          setAutoLog((cur) => [{ id: g.id, dept: g.dept, conf: g.conf, at: Date.now() }, ...cur].slice(0, 30));
+          await sleep(500);
+        }
+      }
+      if (!cancelled) {
+        setCursorId(null);
+        await loadGrievances();
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoMode, threshold, live, session, isOfficer, grievances]);
+
+  const pending = grievances.filter((g) => g.status === "new" || !g.status);
+
+  if (!supabase) {
+    return (
+      <ScreenHeader
+        eyebrow="AI ACTIVITY"
+        title="AI Activity"
+        subtitle="Backend not configured — connect Supabase to watch the AI triage grievances live."
+      />
+    );
+  }
+
+  return (
+    <div>
+      <ScreenHeader
+        eyebrow="AI ACTIVITY"
+        title="AI Activity"
+        subtitle="A live view of the auto-triage engine — turn it on and watch it read, score, and approve grievances above your confidence threshold."
+        badge={live ? <Badge tone="green">● LIVE</Badge> : <Badge tone="slate">demo data</Badge>}
+      />
+
+      {!session ? (
+        <div className="bg-white rounded-[18px] p-8 text-center" style={{ boxShadow: CARD_SHADOW }}>
+          <div className="text-sm text-slate-500 mb-4">Sign in as an officer to turn on auto-triage.</div>
+          <button
+            onClick={onOpenAuth}
+            className="bg-indigo-950 text-white rounded-xl px-5 py-2.5 text-sm font-bold hover:bg-indigo-900"
+          >
+            Login as Officer
+          </button>
+        </div>
+      ) : !isOfficer ? (
+        <div className="bg-white rounded-[18px] p-8 text-center" style={{ boxShadow: CARD_SHADOW }}>
+          <div className="text-sm text-slate-500">
+            This account isn't an officer account. Sign out and use "Login as Officer" with an officer account.
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="bg-white rounded-[18px] p-5 mb-6 flex items-start justify-between gap-6 flex-wrap" style={{ boxShadow: CARD_SHADOW }}>
+            <div>
+              <div className="text-sm font-bold text-slate-900 mb-0.5">AI Auto-Triage</div>
+              <div className="text-xs text-slate-400 max-w-md">
+                When on, grievances the AI is at least {threshold}% confident about are approved
+                automatically. Everything below that always waits for you in the Officer Console.
+              </div>
+            </div>
+            <div className="flex items-center gap-4 pt-0.5">
+              <label className="flex items-center gap-2 text-xs text-slate-500">
+                Threshold
+                <input
+                  type="range"
+                  min="70"
+                  max="99"
+                  value={threshold}
+                  onChange={(e) => setThreshold(Number(e.target.value))}
+                  className="w-28 accent-indigo-600"
+                />
+                <span className="font-bold text-indigo-600 w-9">{threshold}%</span>
+              </label>
+              <button
+                onClick={() => setAutoMode((v) => !v)}
+                aria-pressed={autoMode}
+                className={`w-14 h-8 rounded-full relative transition-colors ${autoMode ? "bg-emerald-500" : "bg-slate-200"}`}
+              >
+                <span
+                  className={`absolute top-1 w-6 h-6 rounded-full bg-white transition-transform ${autoMode ? "translate-x-7" : "translate-x-1"}`}
+                />
+              </button>
+            </div>
+          </div>
+
+          {/* The "cursor" — a persistent status line showing exactly what
+              the engine is doing right now, or why it's idle. */}
+          <div className={`rounded-[18px] p-4 mb-6 flex items-center gap-3 transition-colors ${
+            autoMode ? "bg-indigo-950 text-white" : "bg-slate-100 text-slate-400"
+          }`}>
+            <span className={`text-xl ${cursorId ? "animate-pulse" : ""}`}>🤖</span>
+            <span className="text-sm font-semibold">
+              {autoMode
+                ? cursorStatus || "Watching the queue…"
+                : "Auto-triage is off — turn it on to watch the AI work."}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-6">
+            <div>
+              <div className="text-[11px] font-bold text-slate-400 mb-2">
+                IN THE QUEUE ({pending.length})
+              </div>
+              <div className="space-y-2">
+                {pending.map((g) => {
+                  const active = g.id === cursorId;
+                  const qualifies = g.conf != null && g.conf >= threshold;
+                  return (
+                    <div
+                      key={g.id}
+                      className={`rounded-xl p-3 border-2 transition-all ${
+                        active
+                          ? "border-indigo-500 bg-indigo-50/70 shadow-md scale-[1.02]"
+                          : "border-transparent bg-white"
+                      }`}
+                      style={!active ? { boxShadow: CARD_SHADOW } : undefined}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-mono text-xs text-indigo-600 flex items-center gap-1.5">
+                          {active && <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />}
+                          {g.id}
+                        </span>
+                        <span className={`text-xs font-bold ${qualifies ? "text-emerald-600" : "text-slate-400"}`}>
+                          {g.conf != null ? `${g.conf}% conf.` : "no AI read"}
+                        </span>
+                      </div>
+                      <div className="text-sm text-slate-800">{g.text}</div>
+                    </div>
+                  );
+                })}
+                {pending.length === 0 && (
+                  <div className="text-sm text-slate-400 text-center py-8">Queue is empty.</div>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <div className="text-[11px] font-bold text-slate-400 mb-2">
+                AUTO-APPROVED THIS SESSION ({autoLog.length})
+              </div>
+              <div className="space-y-2">
+                {autoLog.map((entry) => (
+                  <div key={entry.id + entry.at} className="bg-emerald-50/60 border border-emerald-100 rounded-xl p-3 flex items-center justify-between">
+                    <div>
+                      <span className="font-mono text-xs text-emerald-700">{entry.id}</span>
+                      <span className="text-xs text-slate-500 ml-2">{entry.dept}</span>
+                    </div>
+                    <span className="text-xs font-bold text-emerald-700">{entry.conf}%</span>
+                  </div>
+                ))}
+                {autoLog.length === 0 && (
+                  <div className="text-sm text-slate-400 text-center py-8">
+                    {autoMode ? "No high-confidence grievances yet." : "Turn on auto-triage to see it work."}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+
+/* ───────────────────────── SECTION 10.7: INBOX SCREEN ────────────────────── */
+
+function Inbox({ session, onOpenAuth, onCountChange }) {
+  const [notifications, setNotifications] = useState([]);
+
+  const load = async () => {
+    if (!supabase || !session) return;
+    const { data, error } = await supabase
+      .from("notifications")
+      .select("*")
+      .eq("user_id", session.user.id)
+      .order("created_at", { ascending: false });
+    if (!error && data) {
+      setNotifications(data);
+      onCountChange?.(data.filter((n) => !n.read).length);
+    }
+  };
+
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [session]);
+
+  const markRead = async (id) => {
+    if (!supabase) return;
+    await supabase.from("notifications").update({ read: true }).eq("id", id);
+    setNotifications((cur) => {
+      const next = cur.map((n) => (n.id === id ? { ...n, read: true } : n));
+      onCountChange?.(next.filter((n) => !n.read).length);
+      return next;
+    });
+  };
+
+  const markAllRead = async () => {
+    if (!supabase || !session) return;
+    const unreadIds = notifications.filter((n) => !n.read).map((n) => n.id);
+    if (unreadIds.length === 0) return;
+    await supabase.from("notifications").update({ read: true }).in("id", unreadIds);
+    setNotifications((cur) => cur.map((n) => ({ ...n, read: true })));
+    onCountChange?.(0);
+  };
+
+  const unreadCount = notifications.filter((n) => !n.read).length;
+
+  if (!supabase) {
+    return <ScreenHeader eyebrow="INBOX" title="Inbox" subtitle="Backend not configured." />;
+  }
+
+  return (
+    <div>
+      <ScreenHeader
+        eyebrow="INBOX"
+        title="Inbox"
+        subtitle="Status updates on your grievances — approvals, reassignments, and escalations — as they happen."
+        badge={unreadCount > 0 ? <Badge tone="red">{unreadCount} New</Badge> : null}
+        action={
+          unreadCount > 0 ? (
+            <button onClick={markAllRead} className="text-xs font-bold text-indigo-600 hover:underline">
+              Mark all as read
+            </button>
+          ) : null
+        }
+      />
+
+      {!session ? (
+        <div className="bg-white rounded-[18px] p-8 text-center" style={{ boxShadow: CARD_SHADOW }}>
+          <div className="text-sm text-slate-500 mb-4">Sign in to see your notifications.</div>
+          <button
+            onClick={onOpenAuth}
+            className="bg-indigo-950 text-white rounded-xl px-5 py-2.5 text-sm font-bold hover:bg-indigo-900"
+          >
+            Sign In / Sign Up
+          </button>
+        </div>
+      ) : (
+        <div className="bg-white rounded-[18px] overflow-hidden" style={{ boxShadow: CARD_SHADOW }}>
+          {notifications.map((n) => (
+            <button
+              key={n.id}
+              onClick={() => !n.read && markRead(n.id)}
+              className={`w-full text-left flex items-start gap-3 px-4 py-3.5 border-b border-slate-50 last:border-0 transition-colors ${
+                n.read ? "bg-white" : "bg-indigo-50/50 hover:bg-indigo-50"
+              }`}
+            >
+              <span className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${n.read ? "" : "bg-indigo-600"}`} />
+              <div>
+                <div className={`text-sm ${n.read ? "text-slate-600" : "text-slate-900 font-semibold"}`}>{n.message}</div>
+                <div className="text-xs text-slate-400 mt-0.5">
+                  {new Date(n.created_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
+                </div>
+              </div>
+            </button>
+          ))}
+          {notifications.length === 0 && (
+            <div className="text-sm text-slate-400 text-center py-10">No notifications yet.</div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -2682,6 +2941,7 @@ export default function NagpurCommand() {
   const [isOfficer, setIsOfficer] = useState(false);  // does the signed-in session have the officer role
   const [isBlocked, setIsBlocked] = useState(false);  // has an officer blocked this citizen account
   const [authOpen, setAuthOpen] = useState(null);     // null closed, "citizen" or "officer" picks the modal variant
+  const [unreadCount, setUnreadCount] = useState(0);  // unread notifications for the signed-in user
 
   useEffect(() => {
     if (!supabase) return;
@@ -2701,6 +2961,17 @@ export default function NagpurCommand() {
       });
     return () => { cancelled = true; };
   }, [session]);
+
+  useEffect(() => {
+    if (!supabase || !session) { setUnreadCount(0); return; }
+    let cancelled = false;
+    supabase.from("notifications").select("id", { count: "exact", head: true })
+      .eq("user_id", session.user.id).eq("read", false)
+      .then(({ count }) => { if (!cancelled) setUnreadCount(count ?? 0); });
+    return () => { cancelled = true; };
+  }, [session]);
+
+  const navItems = isOfficer ? [...NAV, ...OFFICER_NAV] : NAV;
 
   return (
     <div
@@ -2730,17 +3001,24 @@ export default function NagpurCommand() {
         </div>
 
         <nav className="flex-1 flex flex-col gap-[3px]">
-          {NAV.map((n) => (
+          {navItems.map((n) => (
             <button
               key={n.id}
               onClick={() => setView(n.id)}
-              className={`text-left px-3.5 py-2.5 rounded-xl text-sm transition-colors ${
+              className={`text-left px-3.5 py-2.5 rounded-xl text-sm transition-colors flex items-center justify-between ${
                 view === n.id
                   ? "bg-indigo-600 text-white font-bold"
                   : "text-slate-500 font-semibold hover:bg-slate-50"
               }`}
             >
               {n.label}
+              {n.id === "inbox" && unreadCount > 0 && (
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                  view === n.id ? "bg-white text-indigo-600" : "bg-red-500 text-white"
+                }`}>
+                  {unreadCount}
+                </span>
+              )}
             </button>
           ))}
         </nav>
@@ -2767,7 +3045,9 @@ export default function NagpurCommand() {
             {view === "hotspots"   && <HotspotForecast />}
             {view === "advisory"   && <Advisory />}
             {view === "field"      && <FieldTeams session={session} onOpenAuth={() => setAuthOpen("citizen")} />}
-            {view === "officer"    && <OfficerConsole session={session} isOfficer={isOfficer} onOpenAuth={() => setAuthOpen("officer")} />}
+            {view === "inbox"      && <Inbox session={session} onOpenAuth={() => setAuthOpen("citizen")} onCountChange={setUnreadCount} />}
+            {view === "officer"    && <OfficerConsole session={session} isOfficer={isOfficer} onOpenAuth={() => setAuthOpen("officer")} onOpenAIActivity={() => setView("ai-activity")} />}
+            {view === "ai-activity" && <AIActivity session={session} isOfficer={isOfficer} onOpenAuth={() => setAuthOpen("officer")} />}
             {view === "trust"      && <Trust />}
           </div>
         </div>
