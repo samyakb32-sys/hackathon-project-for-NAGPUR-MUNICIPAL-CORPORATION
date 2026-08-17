@@ -543,7 +543,22 @@ const COMMAND_LAYER_MARKERS = {
  * no API key needed) with coloured markers at real ward coordinates.
  * `markers`: [{ ward, label, color, size? }]
  */
-function NagpurMap({ markers, caption, height = 280, zoom = 12 }) {
+/** Explains what each coloured dot on a map means — without this, a dot is
+ * just a dot until you hover it. Always visible under the map. */
+function MapLegend({ markers }) {
+  return (
+    <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-2.5 px-1">
+      {markers.map((m) => (
+        <div key={m.label} className="flex items-center gap-1.5 text-xs text-slate-600">
+          <span className="rounded-full flex-shrink-0" style={{ width: 9, height: 9, background: m.color }} />
+          {m.label}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function NagpurMap({ markers, caption, height = 280, zoom = 12, legend = true }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const layerRef = useRef(null);
@@ -585,13 +600,16 @@ function NagpurMap({ markers, caption, height = 280, zoom = 12 }) {
   }, [markers]);
 
   return (
-    <div className="relative rounded-2xl overflow-hidden" style={{ height }}>
-      <div ref={containerRef} className="w-full h-full" />
-      {caption && (
-        <div className="absolute bottom-3 left-3 z-[1000] text-[11px] text-slate-700 bg-white/90 px-2 py-1 rounded shadow">
-          {caption}
-        </div>
-      )}
+    <div>
+      <div className="relative rounded-2xl overflow-hidden" style={{ height }}>
+        <div ref={containerRef} className="w-full h-full" />
+        {caption && (
+          <div className="absolute bottom-3 left-3 z-[1000] text-[11px] text-slate-700 bg-white/90 px-2 py-1 rounded shadow">
+            {caption}
+          </div>
+        )}
+      </div>
+      {legend && <MapLegend markers={markers} />}
     </div>
   );
 }
@@ -863,6 +881,7 @@ function AlertDetailModal({ alert, onClose, onIssueAdvisory }) {
               caption="Ambazari, Nagpur"
               height={220}
               zoom={14}
+              legend={false}
               markers={[{ ward: "ambazari", color: "#dc2626", label: "Ambazari — flood risk here", size: 18 }]}
             />
 
