@@ -2003,10 +2003,10 @@ export default function NagpurCommand() {
         fontFamily: "'Inter', sans-serif",
         backgroundColor: "#eef0fb",
         backgroundImage:
-          "radial-gradient(65vw 65vh at 0% -10%, rgba(79,70,229,0.80), transparent 55%)," +
-          "radial-gradient(55vw 60vh at 105% 0%, rgba(147,51,234,0.80), transparent 55%)," +
-          "radial-gradient(60vw 60vh at 15% 115%, rgba(30,27,75,0.80), transparent 60%)," +
-          "radial-gradient(40vw 40vh at 90% 100%, rgba(99,102,241,0.80), transparent 55%)," +
+          "radial-gradient(65vw 65vh at 0% -10%, rgba(79,70,229,0.90), transparent 55%)," +
+          "radial-gradient(55vw 60vh at 105% 0%, rgba(147,51,234,0.90), transparent 55%)," +
+          "radial-gradient(60vw 60vh at 15% 115%, rgba(30,27,75,0.90), transparent 60%)," +
+          "radial-gradient(40vw 40vh at 90% 100%, rgba(99,102,241,0.90), transparent 55%)," +
           "linear-gradient(180deg, #eef0fb 0%, #f6f6fb 100%)",
         backgroundAttachment: "fixed",
       }}
