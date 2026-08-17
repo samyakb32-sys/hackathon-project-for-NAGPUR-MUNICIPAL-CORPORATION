@@ -1064,6 +1064,14 @@ const SLA_DISPLAY = {
   breached: ["red",   "Breached"],
 };
 
+// Small status dot shown before the ID in the triage list — a decision
+// made at a glance, without reading the whole row.
+const STATUS_DOT = {
+  approved:   "bg-emerald-500",
+  escalated:  "bg-amber-500",
+  reassigned: "bg-red-500",
+};
+
 function GrievanceTriage({ session, onOpenAuth }) {
   const [grievances, setGrievances] = useState(GRIEVANCES);
   const [live, setLive] = useState(false);
@@ -1148,6 +1156,16 @@ function GrievanceTriage({ session, onOpenAuth }) {
       // Reflect the change immediately instead of waiting on the refetch,
       // so the click visibly does something even if the refetch is slow.
       setGrievances((cur) => cur.map((g) => (g.id === selectedId ? { ...g, status } : g)));
+
+      // Jump to the next pending grievance so the officer can keep
+      // triaging without clicking back into the list every time.
+      const isPending = (g) => (g.status === "new" || !g.status) && g.id !== selectedId;
+      const curIndex = filteredGrievances.findIndex((g) => g.id === selectedId);
+      const next =
+        filteredGrievances.slice(curIndex + 1).find(isPending) ??
+        filteredGrievances.find(isPending);
+      if (next) setSelectedId(next.id);
+
       await loadGrievances();
     }
     setActionBusy(false);
@@ -1290,7 +1308,10 @@ function GrievanceTriage({ session, onOpenAuth }) {
                   selectedId === g.id ? "bg-indigo-50/70" : "hover:bg-slate-50"
                 }`}
               >
-                <span className="text-xs font-mono text-indigo-600">{g.id}</span>
+                <span className="text-xs font-mono text-indigo-600 flex items-center gap-1.5">
+                  {STATUS_DOT[g.status] && <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${STATUS_DOT[g.status]}`} />}
+                  {g.id}
+                </span>
                 <span>
                   {/* Original language first, translation underneath —
                       this ordering is deliberate: the citizen's own words lead. */}
