@@ -254,3 +254,86 @@ create policy "officers can update site content"
   to authenticated
   using (public.is_officer())
   with check (public.is_officer());
+
+
+-- Nagpur Command — notifications inbox
+--
+-- No chat, just one-way status updates: a citizen gets notified when their
+-- own grievance's status changes, and every officer gets notified when a
+-- new grievance comes in. Rows are only ever written by the triggers below
+-- (security definer, bypasses RLS) — clients can read/mark-read their own,
+-- never insert directly.
+
+create table if not exists public.notifications (
+  id bigint generated always as identity primary key,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  message text not null,
+  grievance_id bigint references public.grievances(id) on delete set null,
+  read boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+alter table public.notifications enable row level security;
+
+drop policy if exists "users can read own notifications" on public.notifications;
+create policy "users can read own notifications"
+  on public.notifications for select
+  to authenticated
+  using (user_id = auth.uid());
+
+drop policy if exists "users can update own notifications" on public.notifications;
+create policy "users can update own notifications"
+  on public.notifications for update
+  to authenticated
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
+
+-- Notify the submitting citizen whenever their grievance's status changes
+-- (approved/reassigned/escalated/resolved) — skipped for grievances with no
+-- linked user_id (submitted before this feature, or via the demo seed).
+create or replace function public.notify_grievance_status_change()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.user_id is not null and new.status is distinct from old.status then
+    insert into public.notifications (user_id, message, grievance_id)
+    values (
+      new.user_id,
+      'Your grievance #GR-' || lpad(new.id::text, 4, '0') || ' is now ' || new.status || '.',
+      new.id
+    );
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_grievance_status_change on public.grievances;
+create trigger on_grievance_status_change
+  after update on public.grievances
+  for each row execute function public.notify_grievance_status_change();
+
+-- Notify every officer when a new grievance comes in.
+create or replace function public.notify_officers_new_grievance()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.notifications (user_id, message, grievance_id)
+  select id,
+         'New grievance #GR-' || lpad(new.id::text, 4, '0') || ' submitted: ' || coalesce(new.dept, 'PENDING REVIEW') || '.',
+         new.id
+  from public.profiles
+  where role = 'officer';
+  return new;
+end;
+$$;
+
+drop trigger if exists on_new_grievance on public.grievances;
+create trigger on_new_grievance
+  after insert on public.grievances
+  for each row execute function public.notify_officers_new_grievance();
