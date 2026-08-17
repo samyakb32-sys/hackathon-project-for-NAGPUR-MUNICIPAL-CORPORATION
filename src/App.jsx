@@ -4,6 +4,7 @@ import "leaflet/dist/leaflet.css";
 import { fetchRainForecast, fetchAQI } from "./lib/liveData.js";
 import { fetchGrievanceTrend } from "./lib/forecast.js";
 import { classifyGrievance } from "./lib/classify.js";
+import { resetPasswordWithDob } from "./lib/resetPassword.js";
 import { supabase } from "./lib/supabase.js";
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -28,8 +29,10 @@ const NAV = [
   { id: "hotspots",   label: "Hotspots & Forecast" },
   { id: "advisory",   label: "Advisory" },
   { id: "field",      label: "Field Teams" },
-  { id: "officer",    label: "Officer Console" },
   { id: "trust",      label: "Trust" },
+  // "officer" is intentionally not in this list — the Officer Console has
+  // its own door (TopBar "Login as Officer" / the profile dropdown once
+  // signed in as one), not a sidebar item everyone sees.
 ];
 
 const SCREEN_TITLES = {
@@ -712,7 +715,7 @@ function NagpurMap({ markers, caption, height = 280, zoom = 12, legend = true })
 
 /* ──────────────────────── SECTION 4: TOP HEADER BAR ──────────────────────── */
 
-function TopBar({ title, session, onOpenAuth }) {
+function TopBar({ title, session, isOfficer, onOpenAuth, onOpenOfficerAuth, onOpenOfficerConsole }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
@@ -741,7 +744,18 @@ function TopBar({ title, session, onOpenAuth }) {
             {menuOpen && (
               <div className="absolute right-0 top-11 bg-white rounded-xl border border-slate-100 p-3 w-56 z-[1100]" style={{ boxShadow: CARD_SHADOW }}>
                 <div className="text-[11px] text-slate-400">Signed in as</div>
-                <div className="text-sm font-semibold text-slate-800 truncate mb-3">{session.user.email}</div>
+                <div className="text-sm font-semibold text-slate-800 truncate mb-3">
+                  {session.user.email}
+                  {isOfficer && <span className="ml-1.5 text-[10px] font-bold text-indigo-600 align-middle">OFFICER</span>}
+                </div>
+                {isOfficer && (
+                  <button
+                    onClick={() => { onOpenOfficerConsole(); setMenuOpen(false); }}
+                    className="w-full text-xs font-bold text-indigo-600 border border-indigo-200 rounded-lg py-1.5 hover:bg-indigo-50 mb-2"
+                  >
+                    Officer Console
+                  </button>
+                )}
                 <button
                   onClick={() => { supabase.auth.signOut(); setMenuOpen(false); }}
                   className="w-full text-xs font-bold text-red-600 border border-red-200 rounded-lg py-1.5 hover:bg-red-50"
@@ -752,12 +766,20 @@ function TopBar({ title, session, onOpenAuth }) {
             )}
           </div>
         ) : (
-          <button
-            onClick={onOpenAuth}
-            className="text-xs font-bold bg-indigo-950 text-white px-3.5 py-2 rounded-[10px] hover:bg-indigo-900 whitespace-nowrap"
-          >
-            Sign In / Sign Up
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onOpenOfficerAuth}
+              className="text-xs font-bold text-indigo-600 border border-indigo-200 px-3.5 py-2 rounded-[10px] hover:bg-indigo-50 whitespace-nowrap"
+            >
+              Login as Officer
+            </button>
+            <button
+              onClick={onOpenAuth}
+              className="text-xs font-bold bg-indigo-950 text-white px-3.5 py-2 rounded-[10px] hover:bg-indigo-900 whitespace-nowrap"
+            >
+              Sign In / Sign Up
+            </button>
+          </div>
         )}
       </div>
     </div>
@@ -1947,7 +1969,7 @@ function FieldTeams({ session, onOpenAuth }) {
 
 /* ─────────────────── SECTION 10.5: OFFICER CONSOLE SCREEN ────────────────── */
 
-function OfficerConsole({ session, onOpenAuth }) {
+function OfficerConsole({ session, isOfficer, onOpenAuth }) {
   const [grievances, setGrievances] = useState(GRIEVANCES);
   const [live, setLive] = useState(false);
   const [autoMode, setAutoMode] = useState(() => localStorage.getItem("nc-ai-auto-mode") === "1");
@@ -2048,8 +2070,14 @@ function OfficerConsole({ session, onOpenAuth }) {
             onClick={onOpenAuth}
             className="bg-indigo-950 text-white rounded-xl px-5 py-2.5 text-sm font-bold hover:bg-indigo-900"
           >
-            Sign In / Sign Up
+            Login as Officer
           </button>
+        </div>
+      ) : !isOfficer ? (
+        <div className="bg-white rounded-[18px] p-8 text-center" style={{ boxShadow: CARD_SHADOW }}>
+          <div className="text-sm text-slate-500">
+            This account isn't an officer account. Sign out and use "Login as Officer" with an officer account.
+          </div>
         </div>
       ) : (
         <>
@@ -2292,28 +2320,69 @@ function Trust() {
 /** Full sign-in/sign-up dialog, opened from the top bar. Session state lives
  * in the root shell (via Supabase's own auth listener); this only drives
  * the form. Closes itself on a successful sign-in. */
-function AuthModal({ onClose }) {
-  const [mode, setMode] = useState("signin"); // "signin" | "signup"
+function AuthModal({ onClose, variant = "citizen", onOfficerLogin }) {
+  const isOfficer = variant === "officer";
+  const [mode, setMode] = useState("signin"); // "signin" | "signup" | "reset"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [dob, setDob] = useState("");
+  const [resetDob, setResetDob] = useState("");
+  const [newPassword, setNewPassword] = useState("");
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [busy, setBusy] = useState(false);
 
   if (!supabase) return null;
 
+  const switchMode = (m) => { setMode(m); setError(""); setInfo(""); };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setBusy(true);
     setError("");
     setInfo("");
-    if (mode === "signin") {
-      const { error: err } = await supabase.auth.signInWithPassword({ email, password });
+
+    if (mode === "reset") {
+      const err = await resetPasswordWithDob(email, resetDob, newPassword);
       setBusy(false);
-      if (err) setError(err.message);
-      else onClose();
+      if (err) setError(err);
+      else {
+        setInfo("Password updated. You can sign in now.");
+        setMode("signin");
+        setPassword("");
+      }
+      return;
+    }
+
+    if (mode === "signin") {
+      const { data, error: err } = await supabase.auth.signInWithPassword({ email, password });
+      if (err) {
+        setBusy(false);
+        setError(err.message);
+        return;
+      }
+      if (isOfficer) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", data.user.id)
+          .maybeSingle();
+        if (profile?.role !== "officer") {
+          await supabase.auth.signOut();
+          setBusy(false);
+          setError("This account isn't an officer account.");
+          return;
+        }
+      }
+      setBusy(false);
+      onClose();
+      if (isOfficer) onOfficerLogin?.();
     } else {
-      const { error: err } = await supabase.auth.signUp({ email, password });
+      const { error: err } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { data: { dob } },
+      });
       setBusy(false);
       if (err) setError(err.message);
       else setInfo("Account created. Check your email to confirm it, then sign in.");
@@ -2325,43 +2394,95 @@ function AuthModal({ onClose }) {
       <div className="bg-white rounded-3xl max-w-sm w-full p-6" onClick={(e) => e.stopPropagation()} style={{ boxShadow: "0 40px 80px -20px rgba(0,0,0,.35)" }}>
         <div className="flex items-center justify-between mb-4">
           <div className="font-extrabold text-lg" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
-            {mode === "signin" ? "Sign In" : "Create an Account"}
+            {mode === "reset" ? "Reset Password" : isOfficer ? "Officer Login" : mode === "signin" ? "Sign In" : "Create an Account"}
           </div>
           <button onClick={onClose} className="text-2xl leading-none text-slate-400 hover:text-slate-600">×</button>
         </div>
 
-        <div className="flex gap-2 mb-4">
-          <button
-            onClick={() => { setMode("signin"); setError(""); setInfo(""); }}
-            className={`flex-1 text-xs font-bold py-2 rounded-lg ${mode === "signin" ? "bg-indigo-950 text-white" : "bg-slate-100 text-slate-500"}`}
-          >
-            Sign In
-          </button>
-          <button
-            onClick={() => { setMode("signup"); setError(""); setInfo(""); }}
-            className={`flex-1 text-xs font-bold py-2 rounded-lg ${mode === "signup" ? "bg-indigo-950 text-white" : "bg-slate-100 text-slate-500"}`}
-          >
-            Sign Up
-          </button>
-        </div>
+        {mode !== "reset" && (
+          <div className="flex gap-2 mb-4">
+            <button
+              onClick={() => switchMode("signin")}
+              className={`flex-1 text-xs font-bold py-2 rounded-lg ${mode === "signin" ? "bg-indigo-950 text-white" : "bg-slate-100 text-slate-500"}`}
+            >
+              Sign In
+            </button>
+            {!isOfficer && (
+              <button
+                onClick={() => switchMode("signup")}
+                className={`flex-1 text-xs font-bold py-2 rounded-lg ${mode === "signup" ? "bg-indigo-950 text-white" : "bg-slate-100 text-slate-500"}`}
+              >
+                Sign Up
+              </button>
+            )}
+          </div>
+        )}
 
-        <form onSubmit={handleSubmit} className="space-y-2.5">
-          <input
-            type="email" required placeholder="Email"
-            value={email} onChange={(e) => setEmail(e.target.value)}
-            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
-          />
-          <input
-            type="password" required minLength={6} placeholder="Password (6+ characters)"
-            value={password} onChange={(e) => setPassword(e.target.value)}
-            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
-          />
-          {error && <div className="text-xs text-red-600">{error}</div>}
-          {info && <div className="text-xs text-emerald-600">{info}</div>}
-          <button type="submit" disabled={busy} className="w-full bg-indigo-950 text-white rounded-lg py-2.5 text-sm font-bold disabled:opacity-50">
-            {busy ? "Please wait…" : mode === "signin" ? "Sign In" : "Create Account"}
-          </button>
-        </form>
+        {mode === "reset" ? (
+          <form onSubmit={handleSubmit} className="space-y-2.5">
+            <p className="text-xs text-slate-400 mb-1">
+              Enter your email, date of birth, and a new password.
+            </p>
+            <input
+              type="email" required placeholder="Email"
+              value={email} onChange={(e) => setEmail(e.target.value)}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+            />
+            <input
+              type="date" required
+              value={resetDob} onChange={(e) => setResetDob(e.target.value)}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-600"
+            />
+            <input
+              type="password" required minLength={6} placeholder="New password (6+ characters)"
+              value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+            />
+            {error && <div className="text-xs text-red-600">{error}</div>}
+            {info && <div className="text-xs text-emerald-600">{info}</div>}
+            <button type="submit" disabled={busy} className="w-full bg-indigo-950 text-white rounded-lg py-2.5 text-sm font-bold disabled:opacity-50">
+              {busy ? "Please wait…" : "Reset Password"}
+            </button>
+            <button type="button" onClick={() => switchMode("signin")} className="w-full text-xs text-slate-400 hover:text-slate-600 pt-1">
+              ← Back to Sign In
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-2.5">
+            <input
+              type="email" required placeholder="Email"
+              value={email} onChange={(e) => setEmail(e.target.value)}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+            />
+            <input
+              type="password" required minLength={6} placeholder="Password (6+ characters)"
+              value={password} onChange={(e) => setPassword(e.target.value)}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+            />
+            {mode === "signup" && (
+              <div>
+                <label className="text-[11px] text-slate-400 block mb-1">
+                  Date of birth (used to reset your password later)
+                </label>
+                <input
+                  type="date" required
+                  value={dob} onChange={(e) => setDob(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-600"
+                />
+              </div>
+            )}
+            {mode === "signin" && (
+              <button type="button" onClick={() => switchMode("reset")} className="text-xs text-indigo-600 hover:underline">
+                Forgot password?
+              </button>
+            )}
+            {error && <div className="text-xs text-red-600">{error}</div>}
+            {info && <div className="text-xs text-emerald-600">{info}</div>}
+            <button type="submit" disabled={busy} className="w-full bg-indigo-950 text-white rounded-lg py-2.5 text-sm font-bold disabled:opacity-50">
+              {busy ? "Please wait…" : mode === "signin" ? "Sign In" : "Create Account"}
+            </button>
+          </form>
+        )}
       </div>
     </div>
   );
@@ -2373,8 +2494,9 @@ function AuthModal({ onClose }) {
 export default function NagpurCommand() {
   const [view, setView] = useState("command");        // which screen is showing
   const [openAlert, setOpenAlert] = useState(null);   // null = modal closed
-  const [session, setSession] = useState(null);       // officer auth session, null = signed out
-  const [authOpen, setAuthOpen] = useState(false);    // sign-in/sign-up dialog
+  const [session, setSession] = useState(null);       // auth session, null = signed out
+  const [isOfficer, setIsOfficer] = useState(false);  // does the signed-in session have the officer role
+  const [authOpen, setAuthOpen] = useState(null);     // null closed, "citizen" or "officer" picks the modal variant
 
   useEffect(() => {
     if (!supabase) return;
@@ -2382,6 +2504,14 @@ export default function NagpurCommand() {
     const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => setSession(sess));
     return () => sub.subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!supabase || !session) { setIsOfficer(false); return; }
+    let cancelled = false;
+    supabase.from("profiles").select("role").eq("id", session.user.id).maybeSingle()
+      .then(({ data }) => { if (!cancelled) setIsOfficer(data?.role === "officer"); });
+    return () => { cancelled = true; };
+  }, [session]);
 
   return (
     <div
@@ -2433,15 +2563,22 @@ export default function NagpurCommand() {
 
       {/* ── Main area ── */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <TopBar title={SCREEN_TITLES[view]} session={session} onOpenAuth={() => setAuthOpen(true)} />
+        <TopBar
+          title={SCREEN_TITLES[view]}
+          session={session}
+          isOfficer={isOfficer}
+          onOpenAuth={() => setAuthOpen("citizen")}
+          onOpenOfficerAuth={() => setAuthOpen("officer")}
+          onOpenOfficerConsole={() => setView("officer")}
+        />
         <div className="flex-1 overflow-y-auto">
           <div key={view} className="page-anim px-11 pt-10 pb-14">
             {view === "command"    && <CommandView onOpenAlert={setOpenAlert} />}
-            {view === "grievances" && <GrievanceTriage session={session} onOpenAuth={() => setAuthOpen(true)} />}
+            {view === "grievances" && <GrievanceTriage session={session} onOpenAuth={() => setAuthOpen("citizen")} />}
             {view === "hotspots"   && <HotspotForecast />}
             {view === "advisory"   && <Advisory />}
-            {view === "field"      && <FieldTeams session={session} onOpenAuth={() => setAuthOpen(true)} />}
-            {view === "officer"    && <OfficerConsole session={session} onOpenAuth={() => setAuthOpen(true)} />}
+            {view === "field"      && <FieldTeams session={session} onOpenAuth={() => setAuthOpen("citizen")} />}
+            {view === "officer"    && <OfficerConsole session={session} isOfficer={isOfficer} onOpenAuth={() => setAuthOpen("officer")} />}
             {view === "trust"      && <Trust />}
           </div>
         </div>
@@ -2457,7 +2594,13 @@ export default function NagpurCommand() {
         }}
       />
 
-      {authOpen && <AuthModal onClose={() => setAuthOpen(false)} />}
+      {authOpen && (
+        <AuthModal
+          variant={authOpen}
+          onClose={() => setAuthOpen(null)}
+          onOfficerLogin={() => setView("officer")}
+        />
+      )}
     </div>
   );
 }
