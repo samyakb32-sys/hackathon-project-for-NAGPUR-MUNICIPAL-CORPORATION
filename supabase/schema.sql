@@ -219,3 +219,38 @@ create policy "officers can delete teams"
   on public.teams for delete
   to authenticated
   using (public.is_officer());
+
+
+-- Nagpur Command — editable site content
+--
+-- Lets an officer edit a handful of front-page text fields (the Command
+-- Center headline/eyebrow/subtitle) from the Officer Console, no code
+-- changes needed. Anything not in this table just falls back to the
+-- built-in default text in the app.
+
+create table if not exists public.site_content (
+  key text primary key,
+  value text not null,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.site_content enable row level security;
+
+drop policy if exists "public can read site content" on public.site_content;
+create policy "public can read site content"
+  on public.site_content for select
+  to anon, authenticated
+  using (true);
+
+drop policy if exists "officers can insert site content" on public.site_content;
+create policy "officers can insert site content"
+  on public.site_content for insert
+  to authenticated
+  with check (public.is_officer());
+
+drop policy if exists "officers can update site content" on public.site_content;
+create policy "officers can update site content"
+  on public.site_content for update
+  to authenticated
+  using (public.is_officer())
+  with check (public.is_officer());
