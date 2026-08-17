@@ -5,6 +5,7 @@ import { fetchRainForecast, fetchAQI } from "./lib/liveData.js";
 import { fetchGrievanceTrend } from "./lib/forecast.js";
 import { classifyGrievance } from "./lib/classify.js";
 import { resetPasswordWithDob } from "./lib/resetPassword.js";
+import { fetchSiteContent, SITE_CONTENT_DEFAULTS } from "./lib/siteContent.js";
 import { supabase } from "./lib/supabase.js";
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -794,28 +795,42 @@ function CommandView({ onOpenAlert }) {
   const [mapLayer, setMapLayer] = useState("Grievances");
   const [dismissedAlerts, setDismissedAlerts] = useState([]);
   const visibleAlerts = ALERTS.filter((a) => !dismissedAlerts.includes(a.id));
+  const [content, setContent] = useState({});
+
+  useEffect(() => { fetchSiteContent().then(setContent); }, []);
+
+  const eyebrow = content.command_eyebrow || SITE_CONTENT_DEFAULTS.command_eyebrow;
+  const headline = content.command_headline || SITE_CONTENT_DEFAULTS.command_headline;
+  const subtitle = content.command_subtitle || SITE_CONTENT_DEFAULTS.command_subtitle;
 
   return (
     <div>
       {/* Kinetic hero headline */}
       <div className="pb-9 mb-9 border-b border-slate-100">
         <div className="text-xs font-bold tracking-[0.12em] text-indigo-600 mb-3.5">
-          TODAY'S FORECAST FOR NAGPUR
+          {eyebrow}
         </div>
-        <KineticHeadline
-          words={[
-            { text: "188", color: "#4338ca" },
-            { text: "problems", break: true },
-            { text: "found", },
-            { text: "before", break: true },
-            { text: "they", },
-            { text: "happen." },
-          ]}
-        />
+        {headline === SITE_CONTENT_DEFAULTS.command_headline ? (
+          <KineticHeadline
+            words={[
+              { text: "188", color: "#4338ca" },
+              { text: "problems", break: true },
+              { text: "found", },
+              { text: "before", break: true },
+              { text: "they", },
+              { text: "happen." },
+            ]}
+          />
+        ) : (
+          <div
+            className="font-extrabold leading-[1.03] tracking-tight text-slate-900"
+            style={{ fontFamily: "'Inter Tight', sans-serif", fontSize: "clamp(40px,6vw,72px)" }}
+          >
+            {headline}
+          </div>
+        )}
         <p className="text-[17px] leading-relaxed text-slate-500 max-w-xl mt-4">
-          This tool looks for floods, bad air, and slow complaints before they get worse — and
-          warns the team early. A human officer always makes the final decision; the computer
-          only suggests.
+          {subtitle}
         </p>
       </div>
 
@@ -2033,6 +2048,9 @@ function OfficerConsole({ session, isOfficer, onOpenAuth }) {
   const [actionError, setActionError] = useState("");
   const [citizens, setCitizens] = useState([]);
   const [citizenBusyId, setCitizenBusyId] = useState(null);
+  const [contentForm, setContentForm] = useState(SITE_CONTENT_DEFAULTS);
+  const [contentSaving, setContentSaving] = useState(false);
+  const [contentSaved, setContentSaved] = useState(false);
 
   const loadGrievances = async () => {
     if (!supabase) return;
@@ -2071,8 +2089,26 @@ function OfficerConsole({ session, isOfficer, onOpenAuth }) {
     setCitizenBusyId(null);
   };
 
-  useEffect(() => { loadGrievances(); loadCitizens(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => {
+    loadGrievances();
+    loadCitizens();
+    fetchSiteContent().then((data) => setContentForm({ ...SITE_CONTENT_DEFAULTS, ...data }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => { localStorage.setItem("nc-ai-auto-mode", autoMode ? "1" : "0"); }, [autoMode]);
+
+  const saveSiteContent = async () => {
+    if (!supabase || !session) return;
+    setContentSaving(true);
+    setContentSaved(false);
+    const rows = Object.entries(contentForm).map(([key, value]) => ({ key, value }));
+    const { error } = await supabase.from("site_content").upsert(rows, { onConflict: "key" });
+    setContentSaving(false);
+    if (!error) {
+      setContentSaved(true);
+      setTimeout(() => setContentSaved(false), 2000);
+    }
+  };
 
   // Auto-approves anything above the confidence threshold whenever the
   // pending list, toggle, or threshold changes — no separate polling loop.
@@ -2293,6 +2329,48 @@ function OfficerConsole({ session, isOfficer, onOpenAuth }) {
               {citizens.length === 0 && (
                 <div className="text-sm text-slate-400 text-center py-8">No citizen accounts yet.</div>
               )}
+            </div>
+          </div>
+
+          <div className="mt-8">
+            <div className="text-[11px] font-bold text-slate-400 mb-2">
+              SITE CONTENT — COMMAND CENTER HERO
+            </div>
+            <div className="bg-white rounded-[18px] p-5 space-y-3" style={{ boxShadow: CARD_SHADOW }}>
+              <div>
+                <label className="text-[11px] text-slate-400 block mb-1">Eyebrow label</label>
+                <input
+                  value={contentForm.command_eyebrow}
+                  onChange={(e) => setContentForm({ ...contentForm, command_eyebrow: e.target.value })}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-slate-400 block mb-1">Headline</label>
+                <textarea
+                  value={contentForm.command_headline}
+                  onChange={(e) => setContentForm({ ...contentForm, command_headline: e.target.value })}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm h-16"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-slate-400 block mb-1">Subtitle</label>
+                <textarea
+                  value={contentForm.command_subtitle}
+                  onChange={(e) => setContentForm({ ...contentForm, command_subtitle: e.target.value })}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm h-20"
+                />
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={saveSiteContent}
+                  disabled={contentSaving}
+                  className="bg-indigo-950 text-white rounded-xl px-5 py-2.5 text-sm font-bold hover:bg-indigo-900 disabled:opacity-50"
+                >
+                  {contentSaving ? "Saving…" : "Save Changes"}
+                </button>
+                {contentSaved && <span className="text-xs text-emerald-600 font-bold">✓ Saved — live on Command Center now</span>}
+              </div>
             </div>
           </div>
         </>
