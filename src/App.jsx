@@ -933,7 +933,7 @@ const SLA_DISPLAY = {
   breached: ["red",   "Breached"],
 };
 
-function GrievanceTriage({ session }) {
+function GrievanceTriage({ session, onOpenAuth }) {
   const [grievances, setGrievances] = useState(GRIEVANCES);
   const [live, setLive] = useState(false);
   const [selectedId, setSelectedId] = useState(GRIEVANCES[0].id);
@@ -1021,7 +1021,10 @@ function GrievanceTriage({ session }) {
           </div>
           {supabase && (
             <button
-              onClick={() => setShowForm((v) => !v)}
+              onClick={() => {
+                if (!session) { onOpenAuth?.(); return; }
+                setShowForm((v) => !v);
+              }}
               className="text-xs font-bold bg-indigo-950 text-white px-3.5 py-2 rounded-[10px] hover:bg-indigo-900 whitespace-nowrap"
             >
               + New Grievance
@@ -1700,7 +1703,7 @@ function AuthModal({ onClose }) {
       <div className="bg-white rounded-3xl max-w-sm w-full p-6" onClick={(e) => e.stopPropagation()} style={{ boxShadow: "0 40px 80px -20px rgba(0,0,0,.35)" }}>
         <div className="flex items-center justify-between mb-4">
           <div className="font-extrabold text-lg" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
-            {mode === "signin" ? "Officer Sign In" : "Create an Officer Account"}
+            {mode === "signin" ? "Sign In" : "Create an Account"}
           </div>
           <button onClick={onClose} className="text-2xl leading-none text-slate-400 hover:text-slate-600">×</button>
         </div>
@@ -1799,7 +1802,7 @@ export default function NagpurCommand() {
         <div className="flex-1 overflow-y-auto">
           <div key={view} className="page-anim px-11 pt-10 pb-14">
             {view === "command"    && <CommandView onOpenAlert={setOpenAlert} />}
-            {view === "grievances" && <GrievanceTriage session={session} />}
+            {view === "grievances" && <GrievanceTriage session={session} onOpenAuth={() => setAuthOpen(true)} />}
             {view === "hotspots"   && <HotspotForecast />}
             {view === "advisory"   && <Advisory />}
             {view === "field"      && <FieldTeams />}

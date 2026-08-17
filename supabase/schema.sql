@@ -16,11 +16,14 @@ create table if not exists public.grievances (
 
 alter table public.grievances enable row level security;
 
--- Citizens (anonymous or signed in) can submit a grievance.
+-- Only signed-in citizens can submit a grievance (the app requires
+-- sign-in/sign-up before showing the intake form; this makes that a real
+-- rule, not just a UI convention someone could bypass by calling the API
+-- directly).
 drop policy if exists "public can insert grievances" on public.grievances;
-create policy "public can insert grievances"
+create policy "signed-in users can insert grievances"
   on public.grievances for insert
-  to anon, authenticated
+  to authenticated
   with check (true);
 
 -- Anyone can read the triage inbox (transparency — no PII is collected).
