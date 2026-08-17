@@ -1032,6 +1032,7 @@ function GrievanceTriage({ session, onOpenAuth }) {
   const [form, setForm] = useState({ text: "", en: "", ward: "", lang: "English" });
   const [submitting, setSubmitting] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
+  const [actionError, setActionError] = useState("");
   const [slaFilter, setSlaFilter] = useState("All");
   const [deptFilter, setDeptFilter] = useState("All Departments");
   const [wardFilter, setWardFilter] = useState("All Wards");
@@ -1099,9 +1100,17 @@ function GrievanceTriage({ session, onOpenAuth }) {
   const triageAction = async (status) => {
     if (!supabase || !session || !selected?.rawId) return;
     setActionBusy(true);
-    await supabase.from("grievances").update({ status }).eq("id", selected.rawId);
+    setActionError("");
+    const { error } = await supabase.from("grievances").update({ status }).eq("id", selected.rawId);
+    if (error) {
+      setActionError(error.message);
+    } else {
+      // Reflect the change immediately instead of waiting on the refetch,
+      // so the click visibly does something even if the refetch is slow.
+      setGrievances((cur) => cur.map((g) => (g.id === selectedId ? { ...g, status } : g)));
+      await loadGrievances();
+    }
     setActionBusy(false);
-    await loadGrievances();
   };
 
   return (
@@ -1236,7 +1245,7 @@ function GrievanceTriage({ session, onOpenAuth }) {
             return (
               <button
                 key={g.id}
-                onClick={() => setSelectedId(g.id)}
+                onClick={() => { setSelectedId(g.id); setActionError(""); }}
                 className={`w-full text-left grid grid-cols-[90px_1fr_130px_60px_90px] px-[18px] py-3.5 border-b border-slate-50 items-center transition-colors ${
                   selectedId === g.id ? "bg-indigo-50/70" : "hover:bg-slate-50"
                 }`}
@@ -1324,6 +1333,12 @@ function GrievanceTriage({ session, onOpenAuth }) {
         <p className="text-[11px] text-center text-slate-400 mb-3">
           AI recommends. Officer decides.
         </p>
+
+        {actionError && (
+          <p className="text-[11px] text-center text-red-600 mb-2">
+            Couldn't save: {actionError}
+          </p>
+        )}
 
         {live && !session && (
           <p className="text-[11px] text-center text-amber-600 mb-2">
