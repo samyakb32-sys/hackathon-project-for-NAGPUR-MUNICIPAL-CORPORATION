@@ -722,16 +722,25 @@ function NagpurMap({ markers, caption, height = 280, zoom = 12, legend = true })
 
 /* ──────────────────────── SECTION 4: TOP HEADER BAR ──────────────────────── */
 
-function TopBar({ title, session, isOfficer, onOpenAuth, onOpenOfficerAuth, onOpenOfficerConsole }) {
+function TopBar({ title, session, isOfficer, onOpenAuth, onOpenOfficerAuth, onOpenOfficerConsole, onToggleSidebar }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
-    <div className="h-[68px] flex-shrink-0 flex items-center justify-between px-9 border-b border-slate-100 bg-white">
-      <div className="text-[15px] font-bold text-slate-900" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
-        {title}
+    <div className="h-[60px] md:h-[68px] flex-shrink-0 flex items-center justify-between px-3 sm:px-5 md:px-9 border-b border-slate-100 bg-white gap-2">
+      <div className="flex items-center gap-2 min-w-0">
+        <button
+          onClick={onToggleSidebar}
+          className="md:hidden flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-50"
+          aria-label="Open menu"
+        >
+          <span className="text-xl leading-none">☰</span>
+        </button>
+        <div className="text-sm md:text-[15px] font-bold text-slate-900 truncate" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
+          {title}
+        </div>
       </div>
-      <div className="flex items-center gap-3.5">
-        <div className="flex items-center gap-1.5 text-xs text-slate-500">
+      <div className="flex items-center gap-2 md:gap-3.5 flex-shrink-0">
+        <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-500">
           <span className="w-[7px] h-[7px] rounded-full bg-emerald-600 pulse-dot" />
           Live · Oct 24, 2023
         </div>
@@ -773,18 +782,19 @@ function TopBar({ title, session, isOfficer, onOpenAuth, onOpenOfficerAuth, onOp
             )}
           </div>
         ) : (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 md:gap-2">
             <button
               onClick={onOpenOfficerAuth}
-              className="text-xs font-bold text-indigo-600 border border-indigo-200 px-3.5 py-2 rounded-[10px] hover:bg-indigo-50 whitespace-nowrap"
+              className="text-[11px] md:text-xs font-bold text-indigo-600 border border-indigo-200 px-2 md:px-3.5 py-1.5 md:py-2 rounded-[10px] hover:bg-indigo-50 whitespace-nowrap"
             >
-              Login as Officer
+              <span className="hidden sm:inline">Login as </span>Officer
             </button>
             <button
               onClick={onOpenAuth}
-              className="text-xs font-bold bg-indigo-950 text-white px-3.5 py-2 rounded-[10px] hover:bg-indigo-900 whitespace-nowrap"
+              className="text-[11px] md:text-xs font-bold bg-indigo-950 text-white px-2 md:px-3.5 py-1.5 md:py-2 rounded-[10px] hover:bg-indigo-900 whitespace-nowrap"
             >
-              Sign In / Sign Up
+              <span className="sm:hidden">Sign In</span>
+              <span className="hidden sm:inline">Sign In / Sign Up</span>
             </button>
           </div>
         )}
@@ -841,18 +851,18 @@ function CommandView({ onOpenAlert }) {
       </div>
 
       {/* Four headline KPIs. "Predicted SLA Breaches" is the proactive one. */}
-      <div className="grid grid-cols-4 gap-5 mb-7">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-5 mb-7">
         <StatCard label="Open Grievances" value={fmt(counts[0])} sub="+12% vs LW" tone="up" />
         <StatCard label="Predicted SLA Breaches (7D)" value={fmt(counts[1])} sub="— Stable" tone="neutral" accent />
         <StatCard label="Active Hotspots" value={fmt(counts[2])} sub="-2 vs LW" tone="down" />
         <StatCard label="Avg Resolution Time" value={counts[3]} suffix="days" sub="+1 day" tone="up" />
       </div>
 
-      <div className="grid grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Map panel */}
         <div className="col-span-2 bg-white rounded-[22px] p-5" style={{ boxShadow: CARD_SHADOW }}>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex gap-2">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+            <div className="flex gap-2 flex-wrap">
               {["Grievances", "Flood Risk", "Air Quality"].map((layer) => (
                 <button
                   key={layer}
@@ -956,7 +966,7 @@ function AlertDetailModal({ alert, onClose, onIssueAdvisory }) {
         style={{ boxShadow: "0 40px 80px -20px rgba(0,0,0,.35)" }}
       >
         {/* Red header — signals criticality immediately */}
-        <div className="bg-red-600 text-white px-7 py-5 rounded-t-3xl flex items-start justify-between">
+        <div className="bg-red-600 text-white px-4 sm:px-7 py-4 sm:py-5 rounded-t-3xl flex items-start justify-between gap-3">
           <div>
             <div className="font-extrabold text-[17px]" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
               ALERT DETAIL: AMBAZARI FLOOD RISK (CRITICAL)
@@ -968,7 +978,7 @@ function AlertDetailModal({ alert, onClose, onIssueAdvisory }) {
           <button onClick={onClose} className="text-2xl leading-none hover:opacity-70">×</button>
         </div>
 
-        <div className="p-7 grid grid-cols-2 gap-7">
+        <div className="p-4 sm:p-7 grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-7">
 
           {/* LEFT COLUMN — the reasoning behind the prediction */}
           <div>
@@ -1210,11 +1220,11 @@ function GrievanceTriage({ session, isOfficer, isBlocked, onOpenAuth }) {
   };
 
   return (
-    <div className="grid grid-cols-3 gap-7">
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-7">
 
       {/* LEFT — the inbox table */}
       <div className="col-span-2">
-        <div className="flex items-start justify-between mb-1">
+        <div className="flex items-start justify-between mb-1 flex-wrap gap-3">
           <div>
             <div className="text-xs font-bold tracking-[0.12em] text-indigo-600 mb-2">CITIZEN GRIEVANCES</div>
             <h1 className="text-[28px] font-extrabold text-slate-900" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
@@ -1261,7 +1271,7 @@ function GrievanceTriage({ session, isOfficer, isBlocked, onOpenAuth }) {
               onChange={(e) => setForm({ ...form, text: e.target.value })}
               className="w-full border border-slate-200 rounded-xl p-2.5 text-sm h-20"
             />
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <input
                 placeholder="English translation (optional)"
                 value={form.en}
@@ -1299,7 +1309,7 @@ function GrievanceTriage({ session, isOfficer, isBlocked, onOpenAuth }) {
           </form>
         )}
 
-        <div className="flex gap-2 mb-4 mt-4 items-center">
+        <div className="flex flex-wrap gap-2 mb-4 mt-4 items-center">
           {["All", "At Risk", "Breached"].map((filter) => (
             <button
               key={filter}
@@ -1330,9 +1340,9 @@ function GrievanceTriage({ session, isOfficer, isBlocked, onOpenAuth }) {
           </select>
         </div>
 
-        <div className="bg-white rounded-[18px] overflow-hidden" style={{ boxShadow: CARD_SHADOW }}>
+        <div className="bg-white rounded-[18px] overflow-x-auto" style={{ boxShadow: CARD_SHADOW }}>
           {/* Column headers */}
-          <div className="grid grid-cols-[90px_1fr_130px_60px_90px] px-[18px] py-3 text-[11px] font-bold text-slate-400 border-b border-slate-50">
+          <div className="grid grid-cols-[90px_1fr_130px_60px_90px] min-w-[560px] px-[18px] py-3 text-[11px] font-bold text-slate-400 border-b border-slate-50">
             <span>ID</span>
             <span>COMPLAINT TEXT</span>
             <span>AI PREDICTION</span>
@@ -1348,7 +1358,7 @@ function GrievanceTriage({ session, isOfficer, isBlocked, onOpenAuth }) {
               <button
                 key={g.id}
                 onClick={() => { setSelectedId(g.id); setActionError(""); }}
-                className={`w-full text-left grid grid-cols-[90px_1fr_130px_60px_90px] px-[18px] py-3.5 border-b border-slate-50 items-center transition-colors ${
+                className={`w-full text-left grid grid-cols-[90px_1fr_130px_60px_90px] min-w-[560px] px-[18px] py-3.5 border-b border-slate-50 items-center transition-colors ${
                   selectedId === g.id ? "bg-indigo-50/70" : "hover:bg-slate-50"
                 }`}
               >
@@ -1404,7 +1414,7 @@ function GrievanceTriage({ session, isOfficer, isBlocked, onOpenAuth }) {
         </div>
 
         <div className="text-[11px] font-bold text-slate-400 mb-2">SYSTEM ANALYSIS</div>
-        <div className="grid grid-cols-2 gap-2 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
           <div className="bg-[#f7f7f9] rounded-xl p-2.5">
             <div className="text-[10px] text-slate-400">PREDICTED DEPT</div>
             <div className="text-sm font-bold">{selected.dept}</div>
@@ -1508,7 +1518,7 @@ function HotspotForecast() {
           )
         }
       />
-      <div className="grid grid-cols-2 gap-6 mb-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
 
         {/* Spatial clusters */}
         <div className="bg-white rounded-[20px] p-5" style={{ boxShadow: CARD_SHADOW }}>
@@ -1585,7 +1595,7 @@ function HotspotForecast() {
         <div className="font-bold text-slate-900 mb-3.5" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
           ⚡ Tactical Interventions
         </div>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {INTERVENTIONS.map((c) => (
             <div
               key={c.ward}
@@ -1630,7 +1640,7 @@ function Advisory() {
   const requestVerification = () => setApprovedSteps((n) => Math.min(n + 1, ADVISORY_APPROVAL_STEPS.length));
 
   return (
-    <div className="grid grid-cols-3 gap-7">
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-7">
 
       {/* LEFT — the composer form */}
       <div className="col-span-2">
@@ -1644,7 +1654,7 @@ function Advisory() {
           Ambazari Flood Risk (Predicted)
         </div>
 
-        <div className="grid grid-cols-2 gap-4 mb-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
           <div>
             <div className="text-[11px] font-bold text-slate-400 mb-2">SEVERITY LEVEL</div>
             <div className="flex gap-2">
@@ -1906,14 +1916,14 @@ function FieldTeams({ session, onOpenAuth }) {
           </button>
         }
       />
-      <div className="grid grid-cols-4 gap-5 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-5 mb-6">
         <StatCard label="Total Teams" value={total} tone="neutral" />
         <StatCard label="Available" value={available} tone="down" />
         <StatCard label="In Progress" value={inProgress} tone="neutral" />
         <StatCard label="Unavailable" value={unavailable} tone="up" />
       </div>
 
-      <div className="grid grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="col-span-2 space-y-6">
           <div className="bg-white rounded-[20px] p-5" style={{ boxShadow: CARD_SHADOW }}>
             <NagpurMap
@@ -2187,7 +2197,7 @@ function OfficerConsole({ session, isOfficer, onOpenAuth, onOpenAIActivity }) {
           <div className="text-[11px] font-bold text-slate-400 mb-2">
             NEEDS YOUR DECISION ({needsReview.length})
           </div>
-          <div className="grid grid-cols-2 gap-3 mb-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">
             {needsReview.map((g) => (
               <div key={g.id} className="bg-white rounded-xl p-3.5" style={{ boxShadow: CARD_SHADOW }}>
                 <div className="flex items-center justify-between mb-1">
@@ -2656,7 +2666,7 @@ function Trust() {
   };
 
   return (
-    <div className="grid grid-cols-3 gap-7">
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-7">
 
       {/* LEFT — the compliance sections */}
       <div className="col-span-2">
@@ -2670,7 +2680,7 @@ function Trust() {
           Here's exactly what we do — and don't do — with your data, in plain words.
         </p>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {ETHICS_SECTIONS.map((s) => (
             <div key={s.title} className="bg-white rounded-[18px] p-[22px]" style={{ boxShadow: CARD_SHADOW }}>
               <div className="text-[22px]">{s.icon}</div>
@@ -2942,6 +2952,7 @@ export default function NagpurCommand() {
   const [isBlocked, setIsBlocked] = useState(false);  // has an officer blocked this citizen account
   const [authOpen, setAuthOpen] = useState(null);     // null closed, "citizen" or "officer" picks the modal variant
   const [unreadCount, setUnreadCount] = useState(0);  // unread notifications for the signed-in user
+  const [sidebarOpen, setSidebarOpen] = useState(false); // mobile-only slide-in sidebar
 
   useEffect(() => {
     if (!supabase) return;
@@ -2989,22 +3000,43 @@ export default function NagpurCommand() {
       }}
     >
 
+      {/* ── Sidebar backdrop (mobile only, while drawer is open) ── */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-[1150] md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* ── Sidebar ── */}
-      <div className="w-[236px] bg-white border-r border-slate-100 flex flex-col flex-shrink-0 py-7 px-4">
-        <div className="px-3 pb-[30px]">
-          <div className="font-extrabold text-[19px] tracking-tight" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
-            DRISHTI
+      <div
+        className={`fixed md:static inset-y-0 left-0 z-[1160] w-[236px] bg-white border-r border-slate-100 flex flex-col flex-shrink-0 py-7 px-4 transform transition-transform duration-200 md:translate-x-0 ${
+          sidebarOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        <div className="px-3 pb-[30px] flex items-start justify-between">
+          <div>
+            <div className="font-extrabold text-[19px] tracking-tight" style={{ fontFamily: "'Inter Tight', sans-serif" }}>
+              DRISHTI
+            </div>
+            <div className="text-[11px] font-bold tracking-[0.14em] text-indigo-600 mt-0.5">
+              NAGPUR CIVIC INTELLIGENCE
+            </div>
           </div>
-          <div className="text-[11px] font-bold tracking-[0.14em] text-indigo-600 mt-0.5">
-            NAGPUR CIVIC INTELLIGENCE
-          </div>
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="md:hidden text-2xl leading-none text-slate-400 hover:text-slate-600 -mt-1"
+            aria-label="Close menu"
+          >
+            ×
+          </button>
         </div>
 
-        <nav className="flex-1 flex flex-col gap-[3px]">
+        <nav className="flex-1 flex flex-col gap-[3px] overflow-y-auto">
           {navItems.map((n) => (
             <button
               key={n.id}
-              onClick={() => setView(n.id)}
+              onClick={() => { setView(n.id); setSidebarOpen(false); }}
               className={`text-left px-3.5 py-2.5 rounded-xl text-sm transition-colors flex items-center justify-between ${
                 view === n.id
                   ? "bg-indigo-600 text-white font-bold"
@@ -3029,7 +3061,7 @@ export default function NagpurCommand() {
       </div>
 
       {/* ── Main area ── */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         <TopBar
           title={SCREEN_TITLES[view]}
           session={session}
@@ -3037,9 +3069,10 @@ export default function NagpurCommand() {
           onOpenAuth={() => setAuthOpen("citizen")}
           onOpenOfficerAuth={() => setAuthOpen("officer")}
           onOpenOfficerConsole={() => setView("officer")}
+          onToggleSidebar={() => setSidebarOpen((v) => !v)}
         />
         <div className="flex-1 overflow-y-auto">
-          <div key={view} className="page-anim px-11 pt-10 pb-14">
+          <div key={view} className="page-anim px-4 sm:px-6 md:px-11 pt-6 md:pt-10 pb-14">
             {view === "command"    && <CommandView onOpenAlert={setOpenAlert} />}
             {view === "grievances" && <GrievanceTriage session={session} isOfficer={isOfficer} isBlocked={isBlocked} onOpenAuth={() => setAuthOpen("citizen")} />}
             {view === "hotspots"   && <HotspotForecast />}
